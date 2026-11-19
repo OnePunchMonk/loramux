@@ -1,0 +1,13 @@
+[project]
+name = "loramux"
+version = "0.0.1"
+requires-python = ">=3.10"
+dependencies = ["torch>=2.4", "safetensors", "numpy"]
+
+[project.optional-dependencies]
+gpu = ["triton"]
+dev = ["pytest"]
+diffusers = ["diffusers", "peft"]
+
+[tool.pytest.ini_options]
+markers = ["gpu: needs a CUDA GPU"]
