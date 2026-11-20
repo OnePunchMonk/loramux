@@ -179,7 +179,7 @@ Environment for every L1/L2 task: `. /home/claude/.venv-loramux/bin/activate`. C
 - Uses `bench.common` timing and CSV; outputs `overhead_pct` vs B0. CLI `python -m bench.linear_chain --tokens 1024,4096,16384 --rank 64 --layers 40 --dim 3072 --adapters 8 --out results/k2a.csv`.
 - Test: a CPU smoke run with tiny shapes produces the expected rows and columns.
 
-### L1.7 Step bench and profiler — `bench/step_bench.py`, `bench/profile_steps.py` — `todo`
+### L1.7 Step bench and profiler — `bench/step_bench.py`, `bench/profile_steps.py` — `review`
 - Model-agnostic: a `StepTarget` protocol `(make_inputs(bs, rows_per_req) -> kwargs, forward(**kwargs))` plus a diffusers implementation for Qwen-Image / FLUX.2 transformers (random latents and text embeddings of the right shapes; real weights loaded by id).
 - `step_bench`: one denoise forward, bs = 8 mixed, attention-only vs all-linear adapter sets, eager vs `torch.compile`; overhead vs base.
 - `profile_steps`: `T_base(bs)`, `T_uniform(bs)`, `T_mixed(bs, k)` for bs ∈ {1,2,4,8,16}, resolutions 512² and 1024² → CSV consumed by the simulator (L2.6). Column contract documented in the module docstring.
