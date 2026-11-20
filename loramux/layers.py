@@ -1,9 +1,12 @@
 from __future__ import annotations
+
 import re
+
 import torch
-import torch.nn as nn
-from .context import current
+from torch import nn
+
 from . import ops  # noqa: F401  (registers the custom op)
+from .context import current
 
 
 class MuxLinear(nn.Module):
@@ -21,10 +24,11 @@ class MuxLinear(nn.Module):
         if m is None or not m.any_lora or not self.pool.has_layer(self.layer_key):
             return y
         A, B, rank = self.pool.buffers(self.layer_key)
-        t = m.tiles
+        v = m.view_for(x)
+        t = v.tiles  # varlen mode until L2 adds the uniform-row kernel path
         torch.ops.loramux.lora_apply_(
-            y.view(-1, y.shape[-1]), x.reshape(-1, x.shape[-1]), A, B, rank, m.slot_id, m.scale,
-            t.tile_seg, t.tile_row0, t.tile_row_end, t.bm, m.seg_start, m.seg_len)
+            y.view(-1, y.shape[-1]), x.reshape(-1, x.shape[-1]), A, B, rank, v.row_slot, v.row_scale,
+            t.tile_seg, t.tile_row0, t.tile_row_end, t.bm, v.seg_start, v.seg_len)
         return y
 
 

@@ -1,4 +1,6 @@
-import pytest, torch
+import pytest
+import torch
+
 from loramux.metadata import build_meta
 from loramux.ops.torch_ref import lora_apply_ref_
 
@@ -16,13 +18,14 @@ def _setup(dev, dt, S=4, R=64, d_in=96, d_out=200):
 
 def test_ref_matches_dense_delta_cpu():
     A, B, rank = _setup("cpu", torch.float32)
-    m = build_meta([2, -1, 0], [0.5, 1., 2.], 0, seg_len=[7, 5, 9])
+    m = build_meta([2, -1, 0], [0.5, 1., 2.], seg_len=[7, 5, 9])
     x = torch.randn(21, 96)
+    v = m.view_for(x)
     y = torch.randn(21, 200)
     exp = y.clone()
     exp[:7] += 0.5 * x[:7] @ (B[2] @ A[2]).T
     exp[12:] += 2.0 * x[12:] @ (B[0] @ A[0]).T
-    lora_apply_ref_(y, x, A, B, rank, m.slot_id, m.scale, m.seg_start, m.seg_len)
+    lora_apply_ref_(y, x, A, B, rank, v.row_slot, v.row_scale, v.seg_start, v.seg_len)
     torch.testing.assert_close(y, exp, atol=1e-4, rtol=1e-4)
 
 
@@ -34,16 +37,17 @@ def test_triton_matches_ref(lens):
     A, B, rank = _setup(dev, dt)
     n = len(lens)
     slots = [(i % 4) if i != 1 else -1 for i in range(n)]
-    m = build_meta(slots, [1.0] * n, 0, seg_len=lens, device=dev)
+    m = build_meta(slots, [1.0] * n, seg_len=lens, device=dev)
     T = sum(lens)
     x = torch.randn(T, 96, device=dev, dtype=dt)
+    v = m.view_for(x)
     y0 = torch.randn(T, 200, device=dev, dtype=dt)
     y_ref = y0.float().clone()
-    lora_apply_ref_(y_ref, x, A, B, rank, m.slot_id, m.scale, m.seg_start, m.seg_len, fp32=True)
+    lora_apply_ref_(y_ref, x, A, B, rank, v.row_slot, v.row_scale, v.seg_start, v.seg_len, fp32=True)
     y = y0.clone()
-    t = m.tiles
-    torch.ops.loramux.lora_apply_(y, x, A, B, rank, m.slot_id, m.scale, t.tile_seg, t.tile_row0,
-                                  t.tile_row_end, t.bm, m.seg_start, m.seg_len)
+    t = v.tiles
+    torch.ops.loramux.lora_apply_(y, x, A, B, rank, v.row_slot, v.row_scale, t.tile_seg, t.tile_row0,
+                                  t.tile_row_end, t.bm, v.seg_start, v.seg_len)
     delta_ref = y_ref - y0.float()
     err = (y.float() - y0.float() - delta_ref).norm() / delta_ref.norm().clamp_min(1e-9)
     assert err < 2e-3

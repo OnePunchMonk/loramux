@@ -1,6 +1,18 @@
-from .context import BatchLoRAMeta, lora_batch, current
-from .metadata import build_meta
+from .context import BatchLoRAMeta, SegView, TileMeta, current, lora_batch
 from .layers import MuxLinear, patch_model
+from .metadata import build_meta, build_tiles, expand_cfg
 from .pool import AdapterPool
 
-__all__ = ["BatchLoRAMeta", "lora_batch", "current", "build_meta", "MuxLinear", "patch_model", "AdapterPool"]
+__all__ = [
+           "AdapterPool",
+           "BatchLoRAMeta",
+           "MuxLinear",
+           "SegView",
+           "TileMeta",
+           "build_meta",
+           "build_tiles",
+           "current",
+           "expand_cfg",
+           "lora_batch",
+           "patch_model",
+]

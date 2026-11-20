@@ -131,7 +131,7 @@ Found while auditing the skeleton. They change the data model, so they come firs
 
 Environment for every L1/L2 task: `. /home/claude/.venv-loramux/bin/activate`. CPU tests: `python -m pytest -q -m "not gpu" tests`. Install extra packages with pip into that venv if a task needs them (`diffusers`, `peft`, `transformers`, `accelerate`); add them to the right `pyproject.toml` extra. Tests that need diffusers are skipped when it isn't importable.
 
-### L1.0 Metadata redesign — `context.py`, `metadata.py`, `layers.py` — `todo`
+### L1.0 Metadata redesign — `context.py`, `metadata.py`, `layers.py` — `review`
 - `BatchLoRAMeta` (new shape): `req_slot: list[int]`, `req_scale: list[float]`, `cfg_layout: str = "concat"`, `device`, `any_lora: bool`, `r_bucket: int`, `seg_len: list[int] | None` (packed mode only). Method `view_for(x) -> SegView`, cached as in decision 1.
 - `SegView`: `rows, N (or None for varlen), uniform: bool, row_slot (int32 device), row_scale (fp32 device), seg_start, seg_len (int32 device), tiles: TileMeta (built lazily, varlen or for the reference path), slot_host: list[int], scale_host: list[float]`.
 - `build_meta(req_slots, req_scales, *, cfg_layout="concat", seg_len=None, rank_of_slot=None, r_max=None, device="cpu")`. `rank_of_slot(slot) -> int` gives the max rank over layers so `r_bucket` can be computed; default `r_bucket = r_max or 64`. Keep `expand_cfg` and `build_tiles` (tests use them).
