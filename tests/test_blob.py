@@ -40,6 +40,18 @@ def test_round_trip_bitwise_bf16_mixed_ranks(tmp_path):
             assert torch.equal(_bits(ob), _bits(b.to(torch.bfloat16)))
 
 
+def test_mmap_tensors_stay_valid_after_return(tmp_path):
+    import gc
+    src = _adapter(2)
+    path = tmp_path / "m.lmx"
+    write_blob(path, src, base_model="toy")
+    out = read_blob(path, mmap=True)  # the function has returned; only the tensors keep the mapping alive
+    gc.collect()
+    for k, (a, b) in src.items():
+        assert torch.equal(_bits(out[k][0]), _bits(a.to(torch.bfloat16)))
+        assert torch.equal(_bits(out[k][1]), _bits(b.to(torch.bfloat16)))
+
+
 def test_offsets_are_256_aligned(tmp_path):
     path = tmp_path / "a.lmx"
     header = write_blob(path, _adapter(), base_model="toy")
