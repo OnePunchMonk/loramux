@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import struct
 from collections.abc import Iterator
 
@@ -101,12 +102,22 @@ def write_blob(path, adapter: dict[str, tuple[torch.Tensor, torch.Tensor]], base
               "meta": dict(meta or {}), "payload_sha256": sha.hexdigest()}
     header_bytes = json.dumps(header, separators=(",", ":")).encode("utf-8")
     payload_start = _align(_PREFIX.size + len(header_bytes))
-    with open(path, "wb") as f:
-        f.write(_PREFIX.pack(MAGIC, len(header_bytes)))
-        f.write(header_bytes)
-        f.write(bytes(payload_start - _PREFIX.size - len(header_bytes)))
-        for chunk in _payload_chunks(items):
-            f.write(chunk)
+    # Write next to the target and rename into place: a reader that has the old file mmapped keeps a valid
+    # inode instead of seeing the file truncated underneath it (SIGBUS).
+    path = os.fspath(path)
+    tmp = f"{path}.tmp.{os.getpid()}"
+    try:
+        with open(tmp, "wb") as f:
+            f.write(_PREFIX.pack(MAGIC, len(header_bytes)))
+            f.write(header_bytes)
+            f.write(bytes(payload_start - _PREFIX.size - len(header_bytes)))
+            for chunk in _payload_chunks(items):
+                f.write(chunk)
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
     return header
 
 
@@ -159,4 +170,56 @@ def read_blob(path, mmap: bool = True, verify: bool = False) -> dict[str, tuple[
         a = _view(words, layer["off_A"], layer["r"], layer["d_in"])
         b = _view(words, layer["off_B"], layer["d_out"], layer["r"])
         out[layer["key"]] = (a, b)
+    return out
+
+
+def convert(src, out_path, keymap, base_model: str, *, fused_groups: dict[str, list[str]] | None = None,
+            **normalize_kwargs) -> dict:
+    """Adapter file / PEFT dir / state dict -> normalize -> optional fused composition -> .lmx blob.
+
+    fused_groups: {engine_key: [member keys in output order]}. Members are canonical (engine) keys produced by the
+    keymap (e.g. to_q, to_k, to_v); they are removed and replaced by one composed layer (compose_fused: A
+    concatenated along rank, B block-diagonal, rank = sum). All members must be present, or none.
+    The file is written via a temp file and os.replace. Returns the blob header.
+    """
+    from .formats import load_lora, normalize
+    from .formats.normalize import compose_fused
+
+    config = None
+    if isinstance(src, dict):
+        sd = src
+    else:
+        sd, config = load_lora(src)
+    if config is not None and "config" not in normalize_kwargs:
+        normalize_kwargs["config"] = config
+    canonical, report = normalize(sd, keymap, **normalize_kwargs)
+    for fused_key, members in (fused_groups or {}).items():
+        present = [m in canonical for m in members]
+        if not any(present):
+            continue
+        if not all(present):
+            missing = [m for m, p in zip(members, present, strict=True) if not p]
+            raise ValueError(f"fused group {fused_key}: members {missing} are missing from the adapter")
+        if fused_key in canonical:
+            raise ValueError(f"fused group {fused_key}: key already present in the adapter")
+        canonical[fused_key] = compose_fused([tuple(t.float() for t in canonical.pop(m)) for m in members])
+    meta = {"format": report["format"], "source": "" if isinstance(src, dict) else os.path.basename(os.fspath(src)),
+            "matched": report["matched"]}
+    return write_blob(out_path, canonical, base_model, meta=meta)
+
+
+def composite_from_blobs(items: list[tuple[str, float]]) -> dict[str, tuple[torch.Tensor, torch.Tensor]]:
+    """[(blob path, strength), ...] -> one canonical adapter, per layer via compose_multi.
+
+    A layer present in only some of the adapters is composed from those alone. Computed in fp32, returned bf16."""
+    from .formats.normalize import compose_multi
+
+    per_layer: dict[str, list] = {}
+    for path, strength in items:
+        for key, (a, b) in read_blob(path).items():
+            per_layer.setdefault(key, []).append((a.float(), b.float(), float(strength)))
+    out = {}
+    for key, parts in per_layer.items():
+        a, b = compose_multi(parts)
+        out[key] = (a.to(torch.bfloat16), b.to(torch.bfloat16))
     return out

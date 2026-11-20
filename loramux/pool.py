@@ -1,6 +1,10 @@
 from __future__ import annotations
+
 from collections import OrderedDict
+
 import torch
+
+from .blob import read_blob, read_header
 
 
 class AdapterPool:
@@ -17,6 +21,7 @@ class AdapterPool:
         self.B = {k: torch.zeros(slots, do, r_max, dtype=dtype, device=device) for k, (di, do) in layer_shapes.items()}
         self.rank = torch.zeros(slots, dtype=torch.int32, device=device)
         self.cpu: dict[str, dict] = {}
+        self.blobs: dict[str, str] = {}      # key -> .lmx path, mapped lazily in ensure_resident
         self.slot_of: dict[str, int] = {}
         self.lru: OrderedDict[str, None] = OrderedDict()   # resident keys, oldest first
         self.refs: dict[str, int] = {}
@@ -41,9 +46,32 @@ class AdapterPool:
                 raise KeyError(f"adapter {key}: unknown layer {k}")
             if a.shape[0] > self.r_max:
                 raise ValueError(f"adapter {key}: rank {a.shape[0]} > r_max {self.r_max} at {k}")
+        self.blobs.pop(key, None)
         self.cpu[key] = {k: (a.to(self.dtype).cpu().pin_memory() if torch.cuda.is_available() else a.to(self.dtype).cpu(),
                              b.to(self.dtype).cpu().pin_memory() if torch.cuda.is_available() else b.to(self.dtype).cpu())
                          for k, (a, b) in tensors.items()}
+
+    def register_blob(self, key: str, path):
+        """CPU-tier entry backed by an .lmx file. Only the header is read now (to validate); the payload is
+        mmapped and copied when ensure_resident loads it."""
+        for lay in read_header(path)["layers"]:
+            k = lay["key"]
+            if k not in self.layer_shapes:
+                raise KeyError(f"adapter {key}: unknown layer {k}")
+            if (lay["d_in"], lay["d_out"]) != tuple(self.layer_shapes[k]):
+                raise ValueError(f"adapter {key}: layer {k} is {lay['d_in']}x{lay['d_out']}, "
+                                 f"pool expects {tuple(self.layer_shapes[k])}")
+            if lay["r"] > self.r_max:
+                raise ValueError(f"adapter {key}: rank {lay['r']} > r_max {self.r_max} at {k}")
+        self.cpu.pop(key, None)
+        self.blobs[key] = str(path)
+
+    def _payload(self, key: str) -> dict:
+        if key in self.cpu:
+            return self.cpu[key]
+        if key in self.blobs:
+            return read_blob(self.blobs[key], mmap=True)
+        raise KeyError(f"adapter {key} is not registered")
 
     def _evict_one(self):
         for key in self.lru:
@@ -62,11 +90,11 @@ class AdapterPool:
             self.hits += 1
             self.lru.move_to_end(key)
             return self._events.get(key)
+        ad = self._payload(key)
         self.misses += 1
         if not self.free:
             self._evict_one()
         slot = self.free.pop()
-        ad = self.cpu[key]
         use_cuda = str(self.device).startswith("cuda")
         stream = torch.cuda.Stream() if use_cuda else None
         ctx = torch.cuda.stream(stream) if use_cuda else _null()

@@ -161,7 +161,7 @@ Environment for every L1/L2 task: `. /home/claude/.venv-loramux/bin/activate`. C
 - `load_gentd26(path) -> list[Request]`: the trace's real schema isn't known here. Accept a CSV with documented columns (`timestamp, request_id, adapters` with `;` separators, optional `steps, width, height`) and a `--column-map` JSON so a real file can be mapped without code changes. Document it in the module docstring.
 - Tests: Gini of a known distribution; the fitted exponent reproduces Gini 0.749 ± 0.01; on 20k synthetic requests, lora_frac, multi_frac, top-5% share (target 53.5%, report the error) and median reuse are close to target; the CSV loader with a column map.
 
-### L1.4 Blob ↔ normalizer ↔ pool (CPU path) — `blob.py`, `pool.py`, `formats/normalize.py` — `todo`
+### L1.4 Blob ↔ normalizer ↔ pool (CPU path) — `blob.py`, `pool.py`, `formats/normalize.py` — `review`
 - `convert(src, out_path, keymap, base_model, *, fused_groups=None, **normalize_kwargs) -> header`: load → normalize → optional fused composition (`fused_groups`: `{engine_key: [member source keys in output order]}`) → `write_blob`. Writes to a temp file and `os.replace` (fixes the SIGBUS-on-overwrite risk).
 - `AdapterPool.register_blob(key, path)`: mmap-backed CPU tier entry (lazy; nothing is copied until `ensure_resident`). Keep `register(key, tensors)` working.
 - `composite_from_blobs([(path, strength), ...]) -> canonical` using `compose_multi` per layer (layers missing in some adapters are handled).
