@@ -103,3 +103,23 @@ def test_diffusers_target_tiny_flux2():
         out = h.step_fn(x, 2, 2)()
     h.close()
     assert out.shape == base.shape and not torch.allclose(out, base, atol=1e-5)
+
+
+def test_compile_mode_requires_warmup():
+    with pytest.raises(ValueError, match="warmup"):
+        run_step_bench(ToyDiTTarget(), bs=2, rank=4, modes=("compile",), warmup=0, rounds=1, iters=1)
+    with pytest.raises(ValueError, match="warmup"):
+        profile_target(ToyDiTTarget(), batch_sizes=(1,), modes=("compile",), warmup=0)
+
+
+def test_all_includes_2d_conditioning_linears():
+    pytest.importorskip("diffusers")
+    from diffusers import QwenImageTransformer2DModel
+
+    from bench.step_bench import DiffusersStepTarget, linear_shapes, token_linears
+    model = QwenImageTransformer2DModel(patch_size=2, in_channels=16, out_channels=4, num_layers=1,
+                                        attention_head_dim=8, num_attention_heads=2, joint_attention_dim=16,
+                                        axes_dims_rope=(2, 2, 4))
+    t = DiffusersStepTarget("qwen_image", model=model, resolution=64, txt_len=6, device="cpu", dtype=torch.float32)
+    kept = token_linears(t, linear_shapes(t.model, "all"))
+    assert "transformer_blocks.0.img_mod.1" in kept and "norm_out.linear" in kept

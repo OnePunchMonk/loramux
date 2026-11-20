@@ -168,15 +168,15 @@ def linear_shapes(model: nn.Module, targets: str) -> dict[str, tuple[int, int]]:
 
 
 def token_linears(target: StepTarget, shapes: dict[str, tuple[int, int]]) -> dict[str, tuple[int, int]]:
-    """Keep the linears that see token tensors ([rows, N, d]) in one forward.
+    """Keep the linears that one forward actually calls, with a [rows, N, d] or [rows, d] input.
 
-    Linears on pooled conditioning (timestep/guidance embedders, AdaLN modulation: 2-D inputs) are dropped, since
-    the segmentation contract needs [rows, N, d] inputs, and linears that the forward never calls are dropped too.
+    2-D inputs (timestep/guidance embedders, AdaLN modulation) are one token per row (`per_row_2d`), so "all" really
+    is every linear the forward uses. Linears that the forward never calls are dropped.
     """
     seen: dict[str, bool] = {}
     mods = dict(target.model.named_modules())
     hooks = [mods[k].register_forward_pre_hook(
-        lambda _m, args, k=k: seen.__setitem__(k, seen.get(k, True) and args[0].dim() >= 3)) for k in shapes]
+        lambda _m, args, k=k: seen.__setitem__(k, seen.get(k, True) and args[0].dim() >= 2)) for k in shapes]
     try:
         with torch.no_grad():
             target.forward(**target.make_inputs(1))
@@ -222,7 +222,7 @@ class LoRAHarness:
             raise ValueError("rows_per_req must be 1 or 2")
 
         def fn():
-            meta = build_meta(slots, [1.0] * bs, cfg_layout="concat", device=dev, r_max=rank)
+            meta = build_meta(slots, [1.0] * bs, cfg_layout="concat", device=dev, r_max=rank, per_row_2d=True)
             with lora_batch(meta):
                 return fwd(**inputs)
         return fn
@@ -233,11 +233,18 @@ def _compiled(fn_factory: Callable[[], Callable], backend: str):
     return torch.compile(fn_factory(), backend=backend)
 
 
+def _need_warmup(modes, warmup: int) -> None:
+    """torch.compile compiles on the first call; the warmup call must absorb it or it lands in the timings."""
+    if "compile" in modes and warmup < 1:
+        raise ValueError("mode 'compile' needs warmup >= 1 so compile time is excluded from the timings")
+
+
 def run_step_bench(target: StepTarget, *, bs: int = 8, k: int | None = None, rank: int = 16,
                    adapter_sets: tuple[str, ...] = ("attn", "all"), modes: tuple[str, ...] = ("eager", "compile"),
                    rows_per_req: int = 1, compile_backend: str = "inductor", rounds: int = 3, warmup: int = 3,
                    iters: int = 10, seed: int = 0) -> list[dict]:
     """Overhead of mixed-adapter LoRA on one denoise step. k = distinct adapters (default bs)."""
+    _need_warmup(modes, warmup)
     seed_all(seed)
     k = k or bs
     rows: list[dict] = []

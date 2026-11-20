@@ -191,6 +191,11 @@ def run(*, tokens: list[int], rank: int, layers: int, dim: int, adapters: int, d
             common = {"tokens_requested": T_req, "tokens": x.shape[0] * x.shape[1], "rows": x.shape[0], "layers": layers,
                           "dim": dim, "rank": rank, "adapters": adapters, "dtype": str(dtype).replace("torch.", ""),
                           "device": device}
+            if callable(fns.get("B5")):            # vLLM's API moves between releases: probe once, don't crash the run
+                try:
+                    fns["B5"]()
+                except Exception as e:  # noqa: BLE001
+                    fns["B5"] = f"error:{type(e).__name__}: {e}"
             live = {b: f for b, f in fns.items() if callable(f) and b in baselines}
             times = interleave(live, rounds=rounds, warmup=warmup, iters=iters)
             base_med = summarize(times["B0"])["median"] if "B0" in times else None

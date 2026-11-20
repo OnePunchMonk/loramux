@@ -9,6 +9,7 @@ fused in the file but separate in the engine (e.g. FLUX qkv): A is shared, B is 
 """
 from __future__ import annotations
 
+import itertools
 import math
 
 import torch
@@ -70,7 +71,7 @@ def normalize(sd: dict, keymap, *, config: dict | None = None, assume_alpha_eq_r
         if not isinstance(tgt, str):
             covered = sum(sl.stop - sl.start for _, sl in pieces)
             if covered != B.shape[0] or pieces[0][1].start != 0 or any(
-                    a[1].stop != b[1].start for a, b in zip(pieces, pieces[1:], strict=False)):
+                    a[1].stop != b[1].start for a, b in itertools.pairwise(pieces)):
                 raise ValueError(f"{mod}: split {[(e, (s.start, s.stop)) for e, s in pieces]} does not tile the "
                                  f"{B.shape[0]} output rows of lora_B")
         for eng, sl in pieces:

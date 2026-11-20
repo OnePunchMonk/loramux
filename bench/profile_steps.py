@@ -30,7 +30,7 @@ from collections.abc import Callable
 import torch
 
 from bench.common import collect_env, interleave, seed_all, summarize, timer_kind, write_csv
-from bench.step_bench import DiffusersStepTarget, LoRAHarness, StepTarget, ToyDiTTarget, _compiled
+from bench.step_bench import DiffusersStepTarget, LoRAHarness, StepTarget, ToyDiTTarget, _compiled, _need_warmup
 
 BATCH_SIZES = (1, 2, 4, 8, 16)
 RESOLUTIONS = (512, 1024)
@@ -42,6 +42,7 @@ def profile_target(target: StepTarget, *, resolution: int = 0, batch_sizes=BATCH
                    compile_backend: str = "inductor", rounds: int = 2, warmup: int = 2, iters: int = 5,
                    seed: int = 0) -> list[dict]:
     """Rows of the CSV described in the module docstring for one target (one resolution)."""
+    _need_warmup(modes, warmup)
     seed_all(seed)
     timer = timer_kind()
     rows: list[dict] = []

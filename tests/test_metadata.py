@@ -103,3 +103,20 @@ def test_per_row_2d_inputs():
         build_meta([0, 1, -1], [1.0] * 3).view_for(x2)
     v = build_meta([0, 1, -1], [1.0] * 3, per_row_2d=True).view_for(x2)
     assert v.rows == 3 and v.N == 1 and v.uniform and v.slot_host == [0, 1, -1]
+
+
+def test_per_row_2d_cfg_and_mismatch():
+    m = build_meta([4, -1, 7], [1.0, 0.5, 2.0], per_row_2d=True)
+    v = m.view_for(torch.randn(6, 8))                       # 2 * n_req rows: CFG-duplicated, concat layout
+    assert v.rows == 6 and v.N == 1 and v.slot_host == [4, -1, 7, 4, -1, 7]
+    assert v.scale_host == [1.0, 0.5, 2.0, 1.0, 0.5, 2.0] and v.len_host == [1] * 6
+    assert m.view_for(torch.randn(6, 8)) is v               # cached for the step
+    vi = build_meta([4, -1, 7], [1.0, 0.5, 2.0], cfg_layout="interleaved", per_row_2d=True).view_for(torch.randn(6, 8))
+    assert vi.slot_host == [4, 4, -1, -1, 7, 7]
+    for rows in (1, 2, 4, 5, 7):
+        with pytest.raises(ValueError, match="rows"):
+            build_meta([4, -1, 7], [1.0] * 3, per_row_2d=True).view_for(torch.randn(rows, 8))
+    # a 2-D input still raises when per_row_2d is off, and packed metadata keeps its own 2-D meaning
+    with pytest.raises(ValueError):
+        build_meta([4, -1, 7], [1.0] * 3).view_for(torch.randn(3, 8))
+    assert build_meta([0, 1], [1.0] * 2, seg_len=[3, 2], per_row_2d=True).view_for(torch.randn(5, 8)).len_host == [3, 2]
