@@ -137,13 +137,14 @@ def write_csv(path, rows: list[dict], env: dict) -> None:
 
 
 def _coerce(value: str):
-    if value == "":
-        return value
+    """int or float only when the text is that number's canonical form, so '007', '1e3' and '1_0' stay strings."""
     for cast in (int, float):
         try:
-            return cast(value)
+            number = cast(value)
         except ValueError:
-            pass
+            continue
+        if str(number) == value:
+            return number
     return value
 
 

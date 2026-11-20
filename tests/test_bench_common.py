@@ -42,10 +42,35 @@ def test_csv_round_trip_with_env(tmp_path):
     assert rows2 == rows
 
 
+def test_csv_numeric_looking_strings_round_trip_as_strings(tmp_path):
+    rows = [{"request_id": "007", "policy": "1e3", "cell": "1_0", "n": 3, "f": 0.1 + 0.2, "s": "P1"}]
+    path = tmp_path / "s.csv"
+    write_csv(path, rows, {})
+    _, back = read_csv(path)
+    assert back == rows
+    assert isinstance(back[0]["request_id"], str) and isinstance(back[0]["n"], int)
+
+
 def test_collect_env_keys_and_types():
     env = collect_env()
     assert {"python", "torch", "timer", "hostname", "timestamp_utc", "gpu", "driver"} <= set(env)
     assert all(v is None or isinstance(v, str) for v in env.values())
+
+
+def test_collect_env_survives_cuda_errors(monkeypatch):
+    def boom(*args, **kwargs):
+        raise RuntimeError("no driver")
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "get_device_name", boom)
+    monkeypatch.setattr(torch.cuda, "driver_version", boom, raising=False)
+    env = collect_env()
+    assert env["gpu"] is None and env["driver"] is None and env["timer"] == "cuda"
+
+
+def test_timer_flag_is_cpu_without_cuda(monkeypatch):
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    assert collect_env()["timer"] == "cpu"
+    assert len(time_cuda(lambda: None, warmup=0, iters=2)) == 2
 
 
 def test_seed_all_is_repeatable():
