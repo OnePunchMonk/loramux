@@ -154,7 +154,7 @@ Environment for every L1/L2 task: `. /home/claude/.venv-loramux/bin/activate`. C
 - `engine_linear_names(model) -> list[str]` helper.
 - Tests (skip without diffusers): the tiny models' linear names; a fake Kohya and a fake Comfy adapter for each model maps 100%; the fused-qkv split reproduces `x @ (B@A).T` for q, k and v.
 
-### L1.3 Traces — `bench/trace/__init__.py`, `synth_trace.py`, `load_gentd26.py` — `todo`
+### L1.3 Traces — `bench/trace/__init__.py`, `synth_trace.py`, `load_gentd26.py` — `review`
 - `trace_stats(adapter_ids_per_request) -> dict`: `lora_frac`, `multi_frac`, `n_unique`, `gini` (over adapter use counts), `top5pct_share`, `median_uses`.
 - `fit_zipf_exponent(n_adapters=874, target_gini=0.749) -> float` by bisection on the expected Gini of Zipf(s) weights.
 - `synth_trace(n_requests, rate_rps, *, n_adapters=874, lora_frac=0.168, multi_frac=0.016, gini=0.749, seed=0) -> list[Request]`. `Request(id, t_arrive, adapters: list[str], scales: list[float], steps=28, width=1024, height=1024, prompt_id)`. Poisson arrivals. Multi requests draw 2 distinct adapters.
