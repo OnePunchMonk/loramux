@@ -147,7 +147,7 @@ Environment for every L1/L2 task: `. /home/claude/.venv-loramux/bin/activate`. C
 - Reject LoKr / LoHa / DoRA keys (`lokr_`, `hada_`, `dora_scale`, `lora_magnitude_vector`) with a clear message.
 - Tests: synthetic state dicts for each format; alpha from config; alpha pattern; missing alpha raises; LoKr rejected; `strict=False` report.
 
-### L1.2 Key maps — `formats/keymaps/__init__.py`, `generic.py`, `qwen_image.py`, `flux2.py` — `todo`
+### L1.2 Key maps — `formats/keymaps/__init__.py`, `generic.py`, `qwen_image.py`, `flux2.py` — `review`
 - `generic.make_keymap(engine_linear_names: list[str]) -> Callable[[str], str | list[tuple[str, slice]] | None]`. It resolves a source module name, after prefix stripping, to an engine key by exact dotted match or by underscore form (`a.b_c.0.d` ↔ `a_b_c_0_d`, built from the engine names so ambiguity is detected and raises).
 - A keymap may return a **split**: a list of `(engine_key, out_slice)` for a source module that is fused in the file but separate in the engine. Example: BFL/Comfy FLUX `double_blocks.0.img_attn.qkv` → diffusers `to_q`, `to_k`, `to_v`. A shares across the parts; `B` is sliced by output rows. The normalizer applies splits. The reverse case (separate in the file, fused in the engine) uses `compose_fused`.
 - `qwen_image.py` and `flux2.py`: rename tables from original/Comfy names to diffusers 0.43 module names. Get the real names by instantiating `QwenImageTransformer2DModel` and the FLUX.2 transformer class from diffusers 0.43 with a tiny config (2 layers, small dims, CPU) and listing `nn.Linear` modules. Read diffusers' own LoRA conversion utilities (`diffusers/loaders/lora_conversion_utils.py`) for the source naming, and cite the functions you mirrored in a module docstring.
