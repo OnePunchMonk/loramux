@@ -77,9 +77,9 @@ def expand_add_(y, z, B, rank, row_slot, row_scale, *, r_bucket: int, N: int = 0
         return y
     uniform = tiles is None
     if uniform:
-        if N <= 0:
-            raise ValueError("uniform mode needs N > 0 (or pass tiles for varlen mode)")
         rows = row_slot.numel()
+        if N <= 0 or T != rows * N:
+            raise ValueError(f"uniform mode needs N > 0 and T == rows * N, got T={T}, rows={rows}, N={N}")
         tile_seg = tile_r0 = tile_r1 = row_slot
     else:
         tile_seg, tile_r0, tile_r1 = tiles.tile_seg, tiles.tile_row0, tiles.tile_row_end

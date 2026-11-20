@@ -117,7 +117,7 @@ def shrink(x, A, rank, row_slot, *, r_bucket: int, N: int = 0, tiles=None, z=Non
         z = torch.empty(T, RB, dtype=z_dtype, device=x.device)
     if T == 0:
         return z
-    if tiles is None and N <= 0:
-        raise ValueError("uniform mode needs N > 0 (or pass tiles for varlen mode)")
+    if tiles is None and (N <= 0 or T != row_slot.numel() * N):
+        raise ValueError(f"uniform mode needs N > 0 and T == rows * N, got T={T}, rows={row_slot.numel()}, N={N}")
     return _launch(x, A, z, a_scale, rank, row_slot, N, tiles, d_out, RB, a_scale is not None)
 

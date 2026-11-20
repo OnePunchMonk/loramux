@@ -115,6 +115,19 @@ def test_interp_varlen_ragged(lens):
 
 
 @pytest.mark.interp
+def test_interp_uniform_rejects_shape_mismatch():
+    from loramux.ops.triton_expand_add import expand_add_
+    from loramux.ops.triton_shrink import shrink
+    A, B, rank = _setup("cpu", torch.float32)
+    slots = torch.tensor([0, 1], dtype=torch.int32)
+    x = torch.randn(9, A.shape[2])                                # 9 != 2 rows * 4 tokens
+    with pytest.raises(ValueError, match="T == rows"):
+        shrink(x, A, rank, slots, r_bucket=64, N=4)
+    with pytest.raises(ValueError, match="T == rows"):
+        expand_add_(torch.zeros(9, B.shape[1]), torch.zeros(9, 64), B, rank, slots, torch.ones(2), r_bucket=64, N=4)
+
+
+@pytest.mark.interp
 def test_interp_small_bucket_and_rank0_layer():
     # pool r_max 4 < 16: the kernel tile is still 16 wide, masked by the rank; a layer with rank 0 everywhere
     A, B, rank = _stale_setup("cpu", torch.float32, ranks=[4, 3, 0], R=4)
