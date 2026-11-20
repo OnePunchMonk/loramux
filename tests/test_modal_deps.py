@@ -32,7 +32,7 @@ def _top_level_imports(path: pathlib.Path) -> set[str]:
 
 def test_modal_images_cover_collection_imports():
     deps = _image_deps()
-    local = {"loramux", "bench", "tests", "tiny_models", "conftest"}
+    local = {"loramux", "bench", "tests", "tiny_models", "conftest", "vllm_shim"}
     stdlib = set(sys.stdlib_module_names)
     missing = {}
     for d in ("tests", "loramux", "bench"):
