@@ -229,7 +229,7 @@ Environment for every L1/L2 task: `. /home/claude/.venv-loramux/bin/activate`. C
 - Output: latency CSV (L0.3 rows) + per-step CSV `(t, bs, k_distinct, step_ms)`.
 - Tests (CPU, toy model, virtual clock): every request completes exactly once; outputs of the mixed loop equal solo generation per request; the keyed policy never mixes adapters in a step; timelines are monotonic.
 
-### L2.6 Simulator — `bench/sim/__init__.py`, `replay_sim.py` — `todo`
+### L2.6 Simulator — `bench/sim/__init__.py`, `replay_sim.py` — `review`
 - Discrete-event replay of a trace with step-time tables from L1.7 (`T_base`, `T_uniform`, `T_mixed`, interpolated over bs and k). Policies P1 (adapter-keyed, `max_num_seqs`, measured swap cost), P2 (mixed; H2D time = bytes / bandwidth, hidden behind text encode as modelled), P3 (mixed with zero LoRA overhead). Same admission rules as the serve loop.
 - Outputs: throughput, P50/P90/P99 E2E per policy and ρ; per-request timelines in the L0.3 format.
 - `validate(sim_csv, serve_csv) -> dict` (P50 error; pass if ≤ 10%).
