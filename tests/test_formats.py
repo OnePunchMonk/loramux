@@ -158,3 +158,14 @@ def test_multi_lora_composition():
     x = torch.randn(4, 6, generator=g)
     exp = 0.5 * x @ a1.T @ b1.T + 2.0 * x @ a2.T @ b2.T
     torch.testing.assert_close(x @ A.T @ B.T, exp, atol=1e-5, rtol=1e-5)
+
+
+def test_split_not_tiling_b_rows_raises():
+    sd = _peft_sd(2, "transformer.blocks.0.qkv")
+    sd["transformer.blocks.0.qkv.lora_B.weight"] = torch.zeros(6, 2)
+    short = lambda m: [("blocks.0.q", slice(0, 2)), ("blocks.0.k", slice(2, 4))]          # covers 4 of 6 rows
+    with pytest.raises(ValueError, match="tile"):
+        normalize(sd, short, config={"lora_alpha": 2})
+    gap = lambda m: [("blocks.0.q", slice(0, 2)), ("blocks.0.k", slice(3, 7))]
+    with pytest.raises(ValueError, match="tile"):
+        normalize(sd, gap, config={"lora_alpha": 2})

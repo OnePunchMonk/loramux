@@ -65,3 +65,15 @@ def test_add_layers_and_host_rank():
     p.register("a", _ad(r=3))
     p.ensure_resident("a")
     assert p.slot_rank(p.slot_of["a"]) == 3 and p.has_layer("l")
+
+
+def test_failed_load_does_not_leak_slot():
+    p = _pool(S=2)
+    p.register("empty", {})            # an adapter with no layers: loading it fails
+    p.register("ok", _ad())
+    free_before = sorted(p.free)
+    with pytest.raises(ValueError):
+        p.ensure_resident("empty")
+    assert sorted(p.free) == free_before and "empty" not in p.slot_of
+    p.ensure_resident("ok")
+    assert "ok" in p.slot_of

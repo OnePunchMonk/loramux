@@ -67,6 +67,12 @@ def normalize(sd: dict, keymap, *, config: dict | None = None, assume_alpha_eq_r
             raise ValueError(f"{mod}: rank {r} > cap {rank_cap}")
         B = B * _alpha_and_scale(fmt, mod, d, r, config, assume_alpha_eq_rank)
         pieces = [(tgt, slice(None))] if isinstance(tgt, str) else list(tgt)
+        if not isinstance(tgt, str):
+            covered = sum(sl.stop - sl.start for _, sl in pieces)
+            if covered != B.shape[0] or pieces[0][1].start != 0 or any(
+                    a[1].stop != b[1].start for a, b in zip(pieces, pieces[1:], strict=False)):
+                raise ValueError(f"{mod}: split {[(e, (s.start, s.stop)) for e, s in pieces]} does not tile the "
+                                 f"{B.shape[0]} output rows of lora_B")
         for eng, sl in pieces:
             if eng in out:
                 raise ValueError(f"{mod}: engine module {eng} is already filled by another entry")

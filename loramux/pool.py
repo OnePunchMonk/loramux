@@ -99,17 +99,7 @@ class AdapterPool:
                 return
         raise RuntimeError("no evictable slot: all resident adapters are in use")
 
-    def ensure_resident(self, key: str):
-        """Start loading if needed. Returns a CUDA event (or None on CPU) to poll with .query()."""
-        if key in self.slot_of:
-            self.hits += 1
-            self.lru.move_to_end(key)
-            return self._events.get(key)
-        ad = self._payload(key)
-        self.misses += 1
-        if not self.free:
-            self._evict_one()
-        slot = self.free.pop()
+    def _load_into(self, slot: int, ad: dict):
         use_cuda = str(self.device).startswith("cuda")
         stream = torch.cuda.Stream() if use_cuda else None
         ctx = torch.cuda.stream(stream) if use_cuda else _null()
@@ -129,6 +119,24 @@ class AdapterPool:
             if use_cuda:
                 ev = torch.cuda.Event()
                 ev.record(stream)
+        return ev
+
+    def ensure_resident(self, key: str):
+        """Start loading if needed. Returns a CUDA event (or None on CPU) to poll with .query()."""
+        if key in self.slot_of:
+            self.hits += 1
+            self.lru.move_to_end(key)
+            return self._events.get(key)
+        ad = self._payload(key)
+        self.misses += 1
+        if not self.free:
+            self._evict_one()
+        slot = self.free.pop()
+        try:
+            ev = self._load_into(slot, ad)
+        except BaseException:
+            self.free.append(slot)   # a failed load must not leak the slot
+            raise
         self.slot_of[key] = slot
         self.lru[key] = None
         self._events[key] = ev
