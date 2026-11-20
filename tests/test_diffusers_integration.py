@@ -99,6 +99,16 @@ def test_wrong_batch_size_raises_and_context_restored():
     assert not model._forward_pre_hooks and not model._forward_hooks
 
 
+def test_nested_mixed_lora_is_rejected_and_state_recovers():
+    model, pool, _ = _setup("attn")
+    s = [pool.slot_of["ad0"]]
+    with mixed_lora(model, s, [1.0]), pytest.raises(RuntimeError, match="nested"), mixed_lora(model, s, [1.0]):
+        pass
+    with mixed_lora(model, s, [1.0]):   # the outer context ended cleanly: a fresh one works and leaves no hooks
+        _run(model, _inputs(1))
+    assert not model._forward_pre_hooks and not model._forward_hooks
+
+
 def test_disable_restores_outputs_bit_exactly():
     model = tiny_qwen_image()
     inp = _inputs(2)

@@ -32,6 +32,13 @@ def test_schedules():
         m.build_schedule("alternate", ["a"], 4)
 
 
+def test_unmeasurable_deltas_stay_none_without_a_repeat_baseline():
+    seen: set = set()
+    rows = m.request_rows("alternate", ["a", "b", "a", "b"], [130.0] * 4, seen, CFG, prev="a")
+    summ = {(r["pattern"], r["metric"]): r for r in m.summary_rows(rows, CFG) if r["kind"] == "summary"}
+    assert summ[("alternate", "swap_cost_ms")]["median_ms"] is None   # not the 130 ms raw latency
+
+
 def test_csv_schema_and_swap_cost(tmp_path):
     seen: set = set()
     rows = m.request_rows("register", ["a", "b"], [500.0, 500.0], seen, CFG)

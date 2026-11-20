@@ -19,6 +19,7 @@ def _assert_outputs(prefix):
 def test_overhead_plot(tmp_path):
     rows = [{"baseline": f"B{b}", "tokens": t, "overhead_pct": 1.0 + b + t / 4096}
             for b in range(6) for t in (1024, 4096, 16384)]
+    rows.append({"baseline": "B5", "tokens": 1024, "overhead_pct": None, "status": "unavailable"})  # no vLLM
     src = tmp_path / "overhead.csv"
     write_csv(src, rows, ENV)
     out = tmp_path / "out" / "overhead"
@@ -27,7 +28,7 @@ def test_overhead_plot(tmp_path):
 
 
 def test_sim_plot(tmp_path):
-    rows = [{"policy": p, "rho": rho, "throughput": 10.0 * rho, "p50_ms": 50.0 * rho, "p99_ms": 200.0 * rho}
+    rows = [{"policy": p, "rho": rho, "throughput_rps": 10.0 * rho, "p50_ms": 50.0 * rho, "p99_ms": 200.0 * rho}
             for p in ("P1", "P2", "P3") for rho in (0.5, 0.7, 0.9)]
     src = tmp_path / "sim.csv"
     write_csv(src, rows, ENV)

@@ -35,7 +35,8 @@ def plot_overhead_vs_tokens(csv, out) -> None:
     _, rows = read_csv(csv)
     series: dict[str, list[tuple[float, float]]] = defaultdict(list)
     for r in rows:
-        series[str(r["baseline"])].append((float(r["tokens"]), float(r["overhead_pct"])))
+        if isinstance(r.get("overhead_pct"), (int, float)):   # unavailable/error baselines have an empty overhead
+            series[str(r["baseline"])].append((float(r["tokens"]), float(r["overhead_pct"])))
     fig = new_figure()
     ax = fig.add_subplot(1, 1, 1)
     for name in sorted(series):
@@ -62,7 +63,7 @@ def plot_sim(csv, out) -> None:
     for policy in sorted(by_policy):
         pts = sorted(by_policy[policy], key=lambda r: float(r["rho"]))
         rho = [float(r["rho"]) for r in pts]
-        ax_t.plot(rho, [float(r["throughput"]) for r in pts], marker="o", label=policy)
+        ax_t.plot(rho, [float(r["throughput_rps"]) for r in pts], marker="o", label=policy)
         ax_p.plot(rho, [float(r["p99_ms"]) for r in pts], marker="o", label=policy)
     for ax, title, ylabel in ((ax_t, "Throughput vs load", "throughput"),
                               (ax_p, "P99 latency vs load", "P99 (ms)")):

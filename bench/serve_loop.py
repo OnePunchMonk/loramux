@@ -124,7 +124,7 @@ class RealClock:
 
     def sync(self, device) -> None:
         if str(device).startswith("cuda"):
-            torch.cuda.synchronize()
+            torch.cuda.current_stream().synchronize()   # not device-wide: the post worker decodes on its own stream
 
 
 @dataclass
@@ -475,6 +475,7 @@ class ServeLoop:
         self.shift = shift if shift is not None else getattr(model, "shift", 1.0)
         self.keep_latents = keep_latents
         self.merged = None          # keyed: (key, scale) currently merged into the base weights
+        self._orig: dict[str, torch.Tensor] = {}   # keyed: pristine copy of every weight ever merged into
         self._linears = None
         self._key_ready: dict = {}  # key -> time its current load completes
 
@@ -516,8 +517,12 @@ class ServeLoop:
         with torch.no_grad():
             for k, (a, b) in self.pool.canonical(key).items():
                 w = lin[k].weight
-                delta = (b.to(w.device, torch.float32) @ a.to(w.device, torch.float32)) * (sign * scale)
-                w.copy_((w.float() + delta).to(w.dtype))
+                orig = self._orig.setdefault(k, w.detach().clone())   # bf16 merge then subtract does not round-trip
+                if sign < 0:
+                    w.copy_(orig)
+                else:
+                    delta = (b.to(w.device, torch.float32) @ a.to(w.device, torch.float32)) * scale
+                    w.copy_((orig.float() + delta).to(w.dtype))
 
     def _swap(self, new_group) -> float:
         old = self.merged

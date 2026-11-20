@@ -72,6 +72,18 @@ def test_mixed_outputs_equal_solo():
         torch.testing.assert_close(res.latents[req.id], solo.latents[req.id], rtol=1e-5, atol=1e-5)
 
 
+def test_keyed_swaps_restore_bf16_weights_bit_exactly():
+    model, pool = _setup("keyed")
+    model.module.to(torch.bfloat16)
+    w0 = {n: p.clone() for n, p in model.module.state_dict().items()}
+    loop = _loop("keyed", model, pool)
+    a, b = list(pool.cpu)[:2]
+    for g in ((a, 1.0), (b, .5), (a, 1.0), None):   # merge then subtract in bf16 would drift; swaps rebuild from the base
+        loop._swap(g)
+    for n, p in model.module.state_dict().items():
+        assert torch.equal(p, w0[n]), n
+
+
 def test_keyed_never_mixes_and_matches_mixed():
     model, pool = _setup("keyed")
     w0 = {n: p.clone() for n, p in model.module.state_dict().items()}

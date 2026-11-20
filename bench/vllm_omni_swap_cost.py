@@ -104,11 +104,15 @@ def request_rows(pattern: str, schedule: list[str], latencies_ms: list[float], s
     return rows
 
 
-def _stats_row(pattern: str, metric: str, xs: list[float], config: dict, value: float | None = None) -> dict:
+_RAW = object()   # no derived value: report the samples' own median / p90 / mean
+
+
+def _stats_row(pattern: str, metric: str, xs: list[float], config: dict, value=_RAW) -> dict:
+    """value=None means "derived but unmeasurable" and stays None; it never falls back to the raw latency median."""
     s = summarize(xs) if xs else {"median": None, "p90": None, "mean": None, "n": 0}
-    med = s["median"] if value is None else value
-    return dict(kind="summary", pattern=pattern, metric=metric, median_ms=med, p90_ms=s["p90"] if value is None
-                else None, mean_ms=s["mean"] if value is None else None, n=s["n"], **config)
+    raw = value is _RAW
+    return dict(kind="summary", pattern=pattern, metric=metric, median_ms=s["median"] if raw else value,
+                p90_ms=s["p90"] if raw else None, mean_ms=s["mean"] if raw else None, n=s["n"], **config)
 
 
 def summary_rows(rows: list[dict], config: dict) -> list[dict]:

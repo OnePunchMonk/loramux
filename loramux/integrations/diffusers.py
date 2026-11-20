@@ -85,6 +85,8 @@ def mixed_lora(pipe, req_slots, req_scales, *, cfg_layout: str = "concat"):
     state = getattr(model, _STATE, None)
     if state is None:
         raise RuntimeError("call enable(pipe, pool) first")
+    if state.get("mixed"):
+        raise RuntimeError("mixed_lora contexts cannot be nested on one model")
     pool = state["pool"]
     slots, scales = list(req_slots), [float(s) for s in req_scales]
     n = len(slots)
@@ -109,11 +111,13 @@ def mixed_lora(pipe, req_slots, req_scales, *, cfg_layout: str = "concat"):
         if saved:
             context._current = saved.pop()
 
+    state["mixed"] = True
     h1 = model.register_forward_pre_hook(pre, with_kwargs=True)
     h2 = model.register_forward_hook(post, with_kwargs=True, always_call=True)
     try:
         yield
     finally:
+        state["mixed"] = False
         h1.remove()
         h2.remove()
         while saved:                       # a pre-hook that ran but whose forward never completed
