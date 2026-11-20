@@ -174,7 +174,7 @@ Environment for every L1/L2 task: `. /home/claude/.venv-loramux/bin/activate`. C
 - `prune_small(canonical, base_weights, rel_thresh=1e-4) -> (canonical', pruned_keys)`.
 - Tests: exactness at energy 1.0; the k chosen hits the energy target on a synthetic low-rank-plus-noise ΔW; FP8 round-trip relative error < 7% per row (e4m3); pruning.
 
-### L1.6 Linear-chain microbench — `bench/linear_chain.py` — `todo`
+### L1.6 Linear-chain microbench — `bench/linear_chain.py` — `review`
 - Chain of `L` linears (`d → d`), bf16 on CUDA (fp32 on CPU for smoke tests), tokens ∈ a list, rank, number of distinct adapters across rows. Baselines: `B0` no LoRA; `B1` merged ΔW (single adapter); `B2` reimplementation of the vLLM-Omni wrapper pattern (full-width delta + slice-assign copy; labelled as a reimplementation in the CSV); `B3` `torch_ref`; `B4` loramux op; `B5` vLLM's `lora_shrink` / `lora_expand` if importable, otherwise a row with `status=unavailable`.
 - Uses `bench.common` timing and CSV; outputs `overhead_pct` vs B0. CLI `python -m bench.linear_chain --tokens 1024,4096,16384 --rank 64 --layers 40 --dim 3072 --adapters 8 --out results/k2a.csv`.
 - Test: a CPU smoke run with tiny shapes produces the expected rows and columns.
