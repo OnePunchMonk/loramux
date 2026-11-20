@@ -24,7 +24,8 @@ Outputs (bench.common.write_csv):
 - latency CSV: one row per request = `LatencyLog.to_rows()` (L0.3: request_id, adapter_key, adapter_source,
   n_steps, the 8 timestamps in s, the 8 breakdown terms in ms) plus `policy`.
 - step CSV: one row per denoise step: t (s, step start), bs, k_distinct (distinct adapters, base excluded),
-  step_ms, plus policy and swap_ms (adapter switch time spent right before this step, keyed policy only).
+  step_ms, plus policy, swap_ms (adapter switch time spent right before this step, keyed policy only) and post_ms
+  (main-thread time spent handing finished requests to the post worker; 0 on the virtual clock).
 """
 from __future__ import annotations
 
@@ -679,7 +680,7 @@ class ServeLoop:
             t_end = self.clock.now()
             res.step_groups.append([r.group for r in running])
             res.step_rows.append({"t": t_start, "bs": len(running), "k_distinct": k, "step_ms": 1e3 * step_s,
-                                  "policy": self.policy, "swap_ms": 1e3 * pending_swap})
+                                  "policy": self.policy, "swap_ms": 1e3 * pending_swap, "post_ms": 0.0})
             pending_swap = 0.0
             done = []
             for r in running:
@@ -692,7 +693,10 @@ class ServeLoop:
                 for r in done:
                     if self.policy == "mixed" and r.key is not None:
                         self.pool.release(r.key)
+                t_post = time.perf_counter()
                 post.submit(done, t_end)
+                if not self.clock.virtual:  # main-thread time handing off VAE + encode (L5); virtual: 0 by design
+                    res.step_rows[-1]["post_ms"] = 1e3 * (time.perf_counter() - t_post)
                 finished.extend(done)
             if not running:
                 group = None
