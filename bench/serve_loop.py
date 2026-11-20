@@ -578,7 +578,7 @@ class ServeLoop:
             self.pool.ensure_resident(r.key)
         except RuntimeError:
             return                              # no evictable slot right now
-        r.slot = self.pool.acquire(r.key)
+        r.slot = self.pool.acquire(r.key, loading_ok=True)   # admitted only once is_ready (below)
         r.t_issue = now
         if src is not AdapterSource.GPU_HIT or r.key not in self._key_ready:
             self._key_ready[r.key] = now + (self.cost.h2d(src, r.key) if self.clock.virtual else 0.0)

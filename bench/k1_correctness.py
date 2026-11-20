@@ -236,6 +236,7 @@ def run_pipeline_checks(a, checks) -> list[dict]:  # pragma: no cover - needs a 
     for n in names:
         pool.register(n, canon[n])
         pool.ensure_resident(n)
+        pool.wait(n)
     slot = {n: pool.acquire(n) for n in names}
     rows: list[dict] = []
     solo: dict = {}

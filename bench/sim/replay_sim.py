@@ -160,7 +160,7 @@ class SimPool:
     def is_ready(self, key) -> bool:
         return key in self.slot_of
 
-    def acquire(self, key) -> int:
+    def acquire(self, key, *, loading_ok: bool = False) -> int:
         self.refs[key] = self.refs.get(key, 0) + 1
         return self.slot_of[key]
 

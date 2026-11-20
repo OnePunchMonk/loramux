@@ -170,3 +170,22 @@ def test_diffusers_step_model_per_row_timesteps():
                 solo = m.denoise(lat[i:i + 1], ts[i:i + 1], e[i:i + 1])
                 torch.testing.assert_close(both[i:i + 1], solo, rtol=1e-4, atol=1e-4)
             assert not torch.allclose(both[0], m.denoise(lat[:1], ts[1:2], e[:1])[0])
+
+
+def test_mixed_pins_in_flight_load_and_admits_once_ready():
+    """GPU semantics on CPU: ensure_resident returns an unfinished event; the loop must pin it and wait."""
+    model, pool = _setup("mixed")
+
+    class Ev:
+        polls = 0
+
+        def query(self):
+            Ev.polls += 1
+            return Ev.polls > 3
+
+    load = pool._load_into
+    pool._load_into = lambda slot, key: (load(slot, key), Ev())[1]
+    tr = _trace(3)
+    res = _loop("mixed", model, pool).run(tr)
+    assert len(res.log.timelines) == 3 and Ev.polls > 3
+    assert all(v == 0 for v in pool.refs.values())

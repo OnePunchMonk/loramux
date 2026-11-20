@@ -411,10 +411,13 @@ class AdapterPool:
         if ev is not None:
             ev.synchronize()
 
-    def acquire(self, key: str) -> int:
+    def acquire(self, key: str, *, loading_ok: bool = False) -> int:
+        """Pin key's slot (refcount; pinned slots are never evicted) and return it. Raises unless the load has
+        completed; loading_ok=True pins an in-flight load, and the caller must see is_ready(key) before the
+        default stream reads the slot."""
         if key not in self.slot_of:
             raise RuntimeError(f"{key} is not resident")
-        if not self.is_ready(key):
+        if not loading_ok and not self.is_ready(key):
             raise RuntimeError(f"{key} is still loading; admit only keys with is_ready(key) (or call wait)")
         self.refs[key] = self.refs.get(key, 0) + 1
         self.lru.move_to_end(key)
