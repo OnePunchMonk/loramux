@@ -37,6 +37,18 @@ def test_oversize_item_is_not_cached_and_drops_old_entry():
     assert c.stats()["entries"] == 0 and c.stats()["bytes"] == 0
 
 
+def test_reput_updates_size_and_recency():
+    c = TextEmbedCache(max_entries=2, max_bytes=100)
+    c.put("a", _t(10))                     # 40 bytes
+    c.put("b", _t(10))                     # 80 bytes, b is most recent
+    c.put("a", _t(5))                      # replaces a: 20 bytes, a is most recent
+    assert c.stats()["bytes"] == 60 and c.stats()["entries"] == 2
+    c.put("c", _t(1))                      # evicts b, the least recent
+    assert c.get("b") is None
+    assert c.get("a").numel() == 5
+    assert c.stats()["evictions"] == 1
+
+
 def test_nested_value_sizes():
     value = (_t(10), {"x": _t(8, torch.bfloat16)}, [_t(2, torch.int64)])
     assert nbytes(value) == 40 + 16 + 16
