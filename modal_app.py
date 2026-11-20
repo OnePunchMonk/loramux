@@ -29,9 +29,6 @@ _cpu = modal.Image.debian_slim(python_version="3.11").pip_install(*_PY_DEPS)
 _gpu = _cpu.pip_install("triton")
 base = _src(_cpu)
 gpu_img = _src(_gpu)
-# add_local_dir must stay last, so the bench images are the same builds as the test images.
-bench_cpu_img = base
-bench_gpu_img = gpu_img
 # Modal H100 SXM5 list rate, $0.001097/s (~$3.95/h), checked 2026-11-20 against third-party price trackers.
 # GPU only: CPU and memory are billed on top. Re-check Modal's pricing page before a large run.
 H100_USD_PER_HOUR = 3.95
@@ -70,7 +67,7 @@ def gpu_tests():
     return _run(["python", "-m", "pytest", "-q", "-m", "gpu", "/work/tests"])
 
 
-@app.function(image=bench_cpu_img, timeout=3600, cpu=2, volumes={RESULTS: results_vol})
+@app.function(image=base, timeout=3600, cpu=2, volumes={RESULTS: results_vol})
 def bench_cpu(script: str, args: str = "") -> dict:
     """Run `python -m <script> <args>`; outputs persist in the `loramux-results` volume."""
     import shlex
@@ -78,7 +75,7 @@ def bench_cpu(script: str, args: str = "") -> dict:
     return {"returncode": rc, "copied_from_work_results": _persist_results()}
 
 
-@app.function(image=bench_gpu_img, gpu="H100!", timeout=3600, volumes={RESULTS: results_vol})
+@app.function(image=gpu_img, gpu="H100!", timeout=3600, volumes={RESULTS: results_vol})
 def bench_gpu(script: str, args: str, est_minutes: float) -> dict:
     """Run a bench script on 1x H100 after checking the spend caps against SPEND.md.
 
