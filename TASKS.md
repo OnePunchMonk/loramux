@@ -45,12 +45,12 @@ The skeleton was written before this pipeline existed, so every file still needs
 
 Each task is self-contained: file paths, behavior and tests are all given here. Use only numpy, torch, safetensors, matplotlib and the standard library unless a task says otherwise.
 
-### L0.1 Project config — `review`
+### L0.1 Project config — `done`
 - `pyproject.toml`: add extras `bench = ["pandas", "matplotlib", "scipy"]` and `modal = ["modal"]`. Add `[tool.ruff]` with `line-length = 120`, target `py310`.
 - `.gitignore`: add `results/*` with exceptions `!results/.gitkeep`. Create `results/.gitkeep`.
 - Accept: `pip install -e .[dev,bench]` works; `ruff check loramux bench tests` passes on new files.
 
-### L0.2 Timing and results utilities — `bench/common.py` — `review`
+### L0.2 Timing and results utilities — `bench/common.py` — `done`
 - `collect_env() -> dict`: python, torch, triton (if importable), diffusers (if importable), safetensors versions; `torch.cuda.get_device_name(0)` and driver version (`torch.cuda.driver_version()` if present, else `nvidia-smi` query, else `None`); hostname; UTC timestamp. Never raises.
 - `time_cuda(fn, warmup=3, iters=20) -> list[float]` (ms per iteration, CUDA events; falls back to `time.perf_counter` with a `"timer": "cpu"` flag when CUDA is absent).
 - `summarize(ms: list[float]) -> dict`: `median`, `p90`, `mean`, `n`.
@@ -59,7 +59,7 @@ Each task is self-contained: file paths, behavior and tests are all given here. 
 - `seed_all(seed)`: python, numpy, torch.
 - Tests `tests/test_bench_common.py` (CPU): summarize on a known list; interleave order alternates (record call order with fakes); CSV round-trip including env.
 
-### L0.3 Request latency record — `loramux/latency.py` — `review`
+### L0.3 Request latency record — `loramux/latency.py` — `done`
 - `AdapterSource` enum: `NONE, GPU_HIT, CPU_HIT, DISK_HIT, MISS`.
 - `RequestTimeline` dataclass with float timestamps (seconds, `time.perf_counter` domain): `t_arrive, t_admit_ready_text, t_adapter_resident, t_first_step, t_last_step, t_vae_done, t_encode_done, t_sent`, plus `adapter_source`, `n_steps`, `request_id`, `adapter_key | None`.
 - `breakdown(tl) -> dict` returns the §11.3 terms in ms:
@@ -75,13 +75,13 @@ Each task is self-contained: file paths, behavior and tests are all given here. 
 - `LatencyLog`: append timelines; `to_rows()` → list of dicts (timestamps, breakdown, source); `percentiles(term, by=("adapter_source",)) -> dict` with P50/P90/P99.
 - Tests: hand-built timelines with known numbers; base-request path; percentiles on a small known set; the sum of terms equals `e2e`.
 
-### L0.4 Prompt-embedding cache — `loramux/textcache.py` — `review`
+### L0.4 Prompt-embedding cache — `loramux/textcache.py` — `done`
 - `TextEmbedCache(max_entries: int, max_bytes: int | None = None)`. Key = `(encoder_id: str, prompt: str, max_len: int)`. Values = a tensor or a tuple/dict of tensors; size = sum of `numel * element_size`.
 - `get(key)` (moves to MRU), `put(key, value)` (evicts LRU until both limits hold; an item larger than `max_bytes` alone is not cached), `stats()` → hits, misses, evictions, entries, bytes.
 - Optional `bypass(adapter_has_text_encoder: bool)` helper returns True when the request carries a text-encoder LoRA (those must not use the cache).
 - Tests: LRU order, byte-limit eviction, oversize item, nested value sizes, stats.
 
-### L0.5 Packed adapter blob — `loramux/blob.py` — `review`
+### L0.5 Packed adapter blob — `loramux/blob.py` — `done`
 File format `.lmx` (§11.1), little-endian:
 ```
 bytes 0..7     magic b"LMXBLOB1"
@@ -99,18 +99,18 @@ payload        per layer, in the given order: A[r, d_in] then B[d_out, r], bf16 
 - `blob_nbytes(path) -> int` (payload bytes only).
 - Tests: round-trip equality (bitwise, bf16) for mixed ranks and shapes; offsets aligned to 256; corrupted payload fails `verify=True`; bad magic raises; empty adapter raises.
 
-### L0.6 Synthetic perf adapters — `bench/synth_adapters.py` — `review`
+### L0.6 Synthetic perf adapters — `bench/synth_adapters.py` — `done`
 - `make_adapter(layer_shapes: dict[str, tuple[int,int]], rank: int, targets: str, seed: int) -> dict` where `targets ∈ {"attn", "all"}`; `"attn"` keeps keys whose last component matches `to_q|to_k|to_v|to_out(\.0)?|attn` (regex given as a module constant `ATTN_PAT`). `A ~ N(0, 1/d_in)`, `B ~ N(0, 1e-2)`, float32.
 - `make_perf_set(layer_shapes, n=64, ranks=(8,16,32,64), seed=0) -> dict[str, dict]`: half `attn`, half `all`, ranks cycled; keys `perf_{i:03d}_{targets}_r{rank}`.
 - CLI: `python -m bench.synth_adapters --shapes shapes.json --out dir/ --n 64` writes one `.lmx` per adapter via `loramux.blob.write_blob`, plus `index.json`.
 - Tests: determinism by seed; rank/target split; attention filter; statistics roughly match (std of A ≈ 1/sqrt(d_in) within 10% on a large layer).
 
-### L0.7 Modal entrypoints and spend guard — `modal_app.py`, `bench/spend.py` — `review`
+### L0.7 Modal entrypoints and spend guard — `modal_app.py`, `bench/spend.py` — `done`
 - `bench/spend.py`: `estimate(gpu: str, minutes: float, usd_per_hour: float) -> float`; `append_row(path="SPEND.md", date, run, gpu, minutes, est_usd, actual_usd)` appends a markdown table row and recomputes the `cumulative` column; `check_caps(path, phase_cap=25.0, total_cap=200.0, phase="1", new_est=…)` raises `SpendCapError` if adding the estimate would exceed a cap. Phase is tracked by a `phase` column (add it to the table header if missing; keep the existing rows valid).
 - `modal_app.py`: add `bench_cpu(script: str, args: str = "")` (CPU, runs `python -m <script> <args>` in `/work`) and `bench_gpu(script, args, est_minutes: float)` (H100!, calls `check_caps` before running and fails fast if exceeded; prints `collect_env()` first). Keep the existing test entrypoints unchanged.
 - Tests (CPU): estimate math; append + cumulative; cap error; parsing an existing table with no rows.
 
-### L0.8 Plots from CSVs — `bench/plots.py`, `bench/latency_breakdown.py` — `review`
+### L0.8 Plots from CSVs — `bench/plots.py`, `bench/latency_breakdown.py` — `done`
 Input CSVs use `bench/common.write_csv`. Pure matplotlib, Agg backend, PNG + SVG output.
 - `plot_overhead_vs_tokens(csv, out)`: columns `baseline, tokens, overhead_pct` → one line per baseline (B0–B5), log-x tokens.
 - `plot_sim(csv, out)`: columns `policy, rho, throughput, p50_ms, p99_ms` → two panels: throughput vs ρ and P99 vs ρ, one line per policy (P1/P2/P3).
@@ -135,14 +135,14 @@ Found while auditing the skeleton. They change the data model, so they come firs
 
 Environment for every L1/L2 task: `. /home/claude/.venv-loramux/bin/activate`. CPU tests: `python -m pytest -q -m "not gpu" tests`. Install extra packages with pip into that venv if a task needs them (`diffusers`, `peft`, `transformers`, `accelerate`); add them to the right `pyproject.toml` extra. Tests that need diffusers are skipped when it isn't importable.
 
-### L1.0 Metadata redesign — `context.py`, `metadata.py`, `layers.py` — `review`
+### L1.0 Metadata redesign — `context.py`, `metadata.py`, `layers.py` — `done`
 - `BatchLoRAMeta` (new shape): `req_slot: list[int]`, `req_scale: list[float]`, `cfg_layout: str = "concat"`, `device`, `any_lora: bool`, `r_bucket: int`, `seg_len: list[int] | None` (packed mode only). Method `view_for(x) -> SegView`, cached as in decision 1.
 - `SegView`: `rows, N (or None for varlen), uniform: bool, row_slot (int32 device), row_scale (fp32 device), seg_start, seg_len (int32 device), tiles: TileMeta (built lazily, varlen or for the reference path), slot_host: list[int], scale_host: list[float]`.
 - `build_meta(req_slots, req_scales, *, cfg_layout="concat", seg_len=None, rank_of_slot=None, r_max=None, device="cpu")`. `rank_of_slot(slot) -> int` gives the max rank over layers so `r_bucket` can be computed; default `r_bucket = r_max or 64`. Keep `expand_cfg` and `build_tiles` (tests use them).
 - `MuxLinear.forward`: `v = meta.view_for(x)` then call the op with the view. Until L2 adds the uniform kernel path, the op is called in varlen mode with `v.tiles`.
 - Update `tests/test_metadata.py`, `tests/test_compile.py` and `tests/test_ops.py` to the new API without weakening them. Add a test with a toy MMDiT block whose two streams have different token counts (e.g. 10 image, 4 text tokens) and different adapters per request: the mixed batch must equal per-request solo runs. Add CFG tests: `rows == 2·n_req` for both layouts, and `rows` mismatches raise.
 
-### L1.1 Format readers — `formats/peft.py`, `kohya.py`, `comfy.py`, `normalize.py` — `review`
+### L1.1 Format readers — `formats/peft.py`, `kohya.py`, `comfy.py`, `normalize.py` — `done`
 - `load_lora(path_or_dir) -> (state_dict, config | None)`: `.safetensors` file, or a directory containing `adapter_model.safetensors` + `adapter_config.json` (PEFT).
 - PEFT: alpha comes from `config["lora_alpha"]` (and `alpha_pattern` / `rank_pattern` per module when present). Missing alpha → `ValueError`, unless `assume_alpha_eq_rank=True`.
 - Kohya: `lora_down` / `lora_up` / `alpha` per module; `lora_unet_` prefix with underscores. Resolve underscores against the engine's module names (see L1.2), never by guessing.
@@ -151,45 +151,45 @@ Environment for every L1/L2 task: `. /home/claude/.venv-loramux/bin/activate`. C
 - Reject LoKr / LoHa / DoRA keys (`lokr_`, `hada_`, `dora_scale`, `lora_magnitude_vector`) with a clear message.
 - Tests: synthetic state dicts for each format; alpha from config; alpha pattern; missing alpha raises; LoKr rejected; `strict=False` report.
 
-### L1.2 Key maps — `formats/keymaps/__init__.py`, `generic.py`, `qwen_image.py`, `flux2.py` — `review`
+### L1.2 Key maps — `formats/keymaps/__init__.py`, `generic.py`, `qwen_image.py`, `flux2.py` — `done`
 - `generic.make_keymap(engine_linear_names: list[str]) -> Callable[[str], str | list[tuple[str, slice]] | None]`. It resolves a source module name, after prefix stripping, to an engine key by exact dotted match or by underscore form (`a.b_c.0.d` ↔ `a_b_c_0_d`, built from the engine names so ambiguity is detected and raises).
 - A keymap may return a **split**: a list of `(engine_key, out_slice)` for a source module that is fused in the file but separate in the engine. Example: BFL/Comfy FLUX `double_blocks.0.img_attn.qkv` → diffusers `to_q`, `to_k`, `to_v`. A shares across the parts; `B` is sliced by output rows. The normalizer applies splits. The reverse case (separate in the file, fused in the engine) uses `compose_fused`.
 - `qwen_image.py` and `flux2.py`: rename tables from original/Comfy names to diffusers 0.43 module names. Get the real names by instantiating `QwenImageTransformer2DModel` and the FLUX.2 transformer class from diffusers 0.43 with a tiny config (2 layers, small dims, CPU) and listing `nn.Linear` modules. Read diffusers' own LoRA conversion utilities (`diffusers/loaders/lora_conversion_utils.py`) for the source naming, and cite the functions you mirrored in a module docstring.
 - `engine_linear_names(model) -> list[str]` helper.
 - Tests (skip without diffusers): the tiny models' linear names; a fake Kohya and a fake Comfy adapter for each model maps 100%; the fused-qkv split reproduces `x @ (B@A).T` for q, k and v.
 
-### L1.3 Traces — `bench/trace/__init__.py`, `synth_trace.py`, `load_gentd26.py` — `review`
+### L1.3 Traces — `bench/trace/__init__.py`, `synth_trace.py`, `load_gentd26.py` — `done`
 - `trace_stats(adapter_ids_per_request) -> dict`: `lora_frac`, `multi_frac`, `n_unique`, `gini` (over adapter use counts), `top5pct_share`, `median_uses`.
 - `fit_zipf_exponent(n_adapters=874, target_gini=0.749) -> float` by bisection on the expected Gini of Zipf(s) weights.
 - `synth_trace(n_requests, rate_rps, *, n_adapters=874, lora_frac=0.168, multi_frac=0.016, gini=0.749, seed=0) -> list[Request]`. `Request(id, t_arrive, adapters: list[str], scales: list[float], steps=28, width=1024, height=1024, prompt_id)`. Poisson arrivals. Multi requests draw 2 distinct adapters.
 - `load_gentd26(path) -> list[Request]`: the trace's real schema isn't known here. Accept a CSV with documented columns (`timestamp, request_id, adapters` with `;` separators, optional `steps, width, height`) and a `--column-map` JSON so a real file can be mapped without code changes. Document it in the module docstring.
 - Tests: Gini of a known distribution; the fitted exponent reproduces Gini 0.749 ± 0.01; on 20k synthetic requests, lora_frac, multi_frac, top-5% share (target 53.5%, report the error) and median reuse are close to target; the CSV loader with a column map.
 
-### L1.4 Blob ↔ normalizer ↔ pool (CPU path) — `blob.py`, `pool.py`, `formats/normalize.py` — `review`
+### L1.4 Blob ↔ normalizer ↔ pool (CPU path) — `blob.py`, `pool.py`, `formats/normalize.py` — `done`
 - `convert(src, out_path, keymap, base_model, *, fused_groups=None, **normalize_kwargs) -> header`: load → normalize → optional fused composition (`fused_groups`: `{engine_key: [member source keys in output order]}`) → `write_blob`. Writes to a temp file and `os.replace` (fixes the SIGBUS-on-overwrite risk).
 - `AdapterPool.register_blob(key, path)`: mmap-backed CPU tier entry (lazy; nothing is copied until `ensure_resident`). Keep `register(key, tensors)` working.
 - `composite_from_blobs([(path, strength), ...]) -> canonical` using `compose_multi` per layer (layers missing in some adapters are handled).
 - Tests: convert → register_blob → ensure_resident on CPU gives the same slot contents as `register`; composite equals the sum of parts on a random input.
 
-### L1.5 Lossy compression reference — `loramux/compress.py` — `review`
+### L1.5 Lossy compression reference — `loramux/compress.py` — `done`
 - `svd_truncate(A, B, energy=0.995, max_rank=None) -> (A', B', k)` via `QR(B)`, `QR(Aᵀ)`, `SVD(R₁R₂ᵀ)` (§11.2.1). Exact when `energy=1.0` (up to fp tolerance).
 - `effective_rank_report(canonical, energy) -> dict[layer, (r, k)]`.
 - `quantize_fp8_rows(t) -> (q: float8_e4m3fn, scale: fp32 per row)`, `dequantize_fp8_rows(q, scale) -> bf16`. Per-row amax scaling; zero rows stay zero.
 - `prune_small(canonical, base_weights, rel_thresh=1e-4) -> (canonical', pruned_keys)`.
 - Tests: exactness at energy 1.0; the k chosen hits the energy target on a synthetic low-rank-plus-noise ΔW; FP8 round-trip relative error < 7% per row (e4m3); pruning.
 
-### L1.6 Linear-chain microbench — `bench/linear_chain.py` — `review`
+### L1.6 Linear-chain microbench — `bench/linear_chain.py` — `done`
 - Chain of `L` linears (`d → d`), bf16 on CUDA (fp32 on CPU for smoke tests), tokens ∈ a list, rank, number of distinct adapters across rows. Baselines: `B0` no LoRA; `B1` merged ΔW (single adapter); `B2` reimplementation of the vLLM-Omni wrapper pattern (full-width delta + slice-assign copy; labelled as a reimplementation in the CSV); `B3` `torch_ref`; `B4` loramux op; `B5` vLLM's `lora_shrink` / `lora_expand` if importable, otherwise a row with `status=unavailable`.
 - Uses `bench.common` timing and CSV; outputs `overhead_pct` vs B0. CLI `python -m bench.linear_chain --tokens 1024,4096,16384 --rank 64 --layers 40 --dim 3072 --adapters 8 --out results/k2a.csv`.
 - Test: a CPU smoke run with tiny shapes produces the expected rows and columns.
 
-### L1.7 Step bench and profiler — `bench/step_bench.py`, `bench/profile_steps.py` — `review`
+### L1.7 Step bench and profiler — `bench/step_bench.py`, `bench/profile_steps.py` — `done`
 - Model-agnostic: a `StepTarget` protocol `(make_inputs(bs, rows_per_req) -> kwargs, forward(**kwargs))` plus a diffusers implementation for Qwen-Image / FLUX.2 transformers (random latents and text embeddings of the right shapes; real weights loaded by id).
 - `step_bench`: one denoise forward, bs = 8 mixed, attention-only vs all-linear adapter sets, eager vs `torch.compile`; overhead vs base.
 - `profile_steps`: `T_base(bs)`, `T_uniform(bs)`, `T_mixed(bs, k)` for bs ∈ {1,2,4,8,16}, resolutions 512² and 1024² → CSV consumed by the simulator (L2.6). Column contract documented in the module docstring.
 - Test: CPU smoke run with a toy DiT `StepTarget`.
 
-### L1.8 diffusers integration — `loramux/integrations/__init__.py`, `diffusers.py` — `review`
+### L1.8 diffusers integration — `loramux/integrations/__init__.py`, `diffusers.py` — `done`
 - `enable(pipe, pool, targets="attn"|"all"|list[regex]) -> list[str]` patches `pipe.transformer` with `patch_model`, after registering the pool's layer shapes from the model.
 - `mixed_lora(pipe, req_slots, req_scales)` context manager: installs a forward pre-hook on the transformer that builds the step's `BatchLoRAMeta`. CFG is detected from the batch dimension at call time (decision 1); works both for pipelines that call the transformer twice (cond, uncond) and for those that concatenate.
 - `disable(pipe)` restores the original linears.
