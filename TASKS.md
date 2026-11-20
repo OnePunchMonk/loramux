@@ -138,7 +138,7 @@ Environment for every L1/L2 task: `. /home/claude/.venv-loramux/bin/activate`. C
 - `MuxLinear.forward`: `v = meta.view_for(x)` then call the op with the view. Until L2 adds the uniform kernel path, the op is called in varlen mode with `v.tiles`.
 - Update `tests/test_metadata.py`, `tests/test_compile.py` and `tests/test_ops.py` to the new API without weakening them. Add a test with a toy MMDiT block whose two streams have different token counts (e.g. 10 image, 4 text tokens) and different adapters per request: the mixed batch must equal per-request solo runs. Add CFG tests: `rows == 2·n_req` for both layouts, and `rows` mismatches raise.
 
-### L1.1 Format readers — `formats/peft.py`, `kohya.py`, `comfy.py`, `normalize.py` — `todo`
+### L1.1 Format readers — `formats/peft.py`, `kohya.py`, `comfy.py`, `normalize.py` — `review`
 - `load_lora(path_or_dir) -> (state_dict, config | None)`: `.safetensors` file, or a directory containing `adapter_model.safetensors` + `adapter_config.json` (PEFT).
 - PEFT: alpha comes from `config["lora_alpha"]` (and `alpha_pattern` / `rank_pattern` per module when present). Missing alpha → `ValueError`, unless `assume_alpha_eq_rank=True`.
 - Kohya: `lora_down` / `lora_up` / `alpha` per module; `lora_unet_` prefix with underscores. Resolve underscores against the engine's module names (see L1.2), never by guessing.
