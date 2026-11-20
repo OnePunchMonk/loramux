@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import torch
 
-from .triton_shrink import shrink, shrink_grouped
+from .triton_shrink import shrink
 
 
 def shrink_fp8w(x, A_q, a_scale, rank, row_slot, *, r_bucket: int, N: int = 0, tiles=None, z=None,
@@ -15,14 +15,6 @@ def shrink_fp8w(x, A_q, a_scale, rank, row_slot, *, r_bucket: int, N: int = 0, t
     _check(A_q, a_scale)
     return shrink(x, A_q, rank, row_slot, r_bucket=r_bucket, N=N, tiles=tiles, z=z, z_dtype=z_dtype,
                   a_scale=a_scale, d_out=d_out)
-
-
-def shrink_grouped_fp8w(x, A_cat_q, a_scale_cat, ranks, row_slot, *, G: int, r_bucket: int, N: int = 0,
-                        tiles=None, z_dtype=torch.float32, d_out: int = 0):
-    """A_cat_q [S, G*R, d_in] float8_e4m3fn, a_scale_cat [S, G*R] fp32. See `triton_shrink.shrink_grouped`."""
-    _check(A_cat_q, a_scale_cat)
-    return shrink_grouped(x, A_cat_q, ranks, row_slot, G=G, r_bucket=r_bucket, N=N, tiles=tiles, z_dtype=z_dtype,
-                          a_scale=a_scale_cat, d_out=d_out)
 
 
 def _check(q, scale):

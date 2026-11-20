@@ -1,6 +1,5 @@
 """Op tests. `interp` tests run the Triton kernels in the interpreter on CPU (fp32, small shapes); `gpu` tests
 run them compiled in bf16. Both compare against the torch reference with per-layer ranks."""
-import math
 
 import pytest
 import torch
@@ -145,29 +144,6 @@ def test_interp_z_bf16_workspace():
 
 
 @pytest.mark.interp
-def test_interp_grouped_shrink_equals_per_linear():
-    from loramux.ops.triton_shrink import shrink, shrink_grouped
-    G, R, S = 3, 32, 3
-    ranks = torch.tensor([[8, 0, 32], [16, 4, 0], [32, 32, 1]], dtype=torch.int32)   # [G, S]
-    A_cat = torch.full((S, G * R, D_IN), float("nan"))
-    for gi in range(G):
-        for s in range(S):
-            r = int(ranks[gi, s])
-            A_cat[s, gi * R:gi * R + r] = torch.randn(r, D_IN)
-    slots, N = torch.tensor([2, -1, 0, 1], dtype=torch.int32), 7
-    x = torch.randn(4 * N, D_IN)
-    zg = shrink_grouped(x, A_cat, ranks, slots, G=G, r_bucket=32, N=N)
-    for gi in range(G):
-        z = shrink(x, A_cat[:, gi * R:(gi + 1) * R], ranks[gi], slots, r_bucket=32, N=N)
-        for row, s in enumerate(slots.tolist()):
-            r = int(ranks[gi, s]) if s >= 0 else 0
-            if r:
-                rs = slice(row * N, (row + 1) * N)
-                torch.testing.assert_close(zg[rs, gi * 32:gi * 32 + r], z[rs, :r])
-                torch.testing.assert_close(z[rs, :r], x[rs] @ A_cat[s, gi * R:gi * R + r].T, atol=1e-4, rtol=1e-4)
-
-
-@pytest.mark.interp
 @pytest.mark.parametrize("packed", [False, True])
 def test_interp_custom_op_matches_ref(monkeypatch, packed):
     from loramux.ops import custom_op
@@ -233,66 +209,3 @@ def test_triton_uniform_bf16(N, d_in, d_out, z_bf16):
     exp = _dense_expected(y0, x, A, B, rank, slots, scales, [i * N for i in range(6)], [N] * 6)
     assert torch.isfinite(y).all()
     assert _rel_err(y, y0, exp) < (4e-3 if z_bf16 else 2e-3)
-
-
-@pytest.mark.gpu
-def test_triton_grouped_bf16():
-    from loramux.ops.triton_shrink import shrink, shrink_grouped
-    dev = "cuda"
-    G, R, S, N = 3, 64, 4, 300
-    ranks = torch.randint(0, R + 1, (G, S), dtype=torch.int32, device=dev)
-    A_cat = torch.randn(S, G * R, 512, device=dev, dtype=torch.bfloat16)
-    slots = torch.tensor([0, 1, -1, 2, 3], dtype=torch.int32, device=dev)
-    x = torch.randn(5 * N, 512, device=dev, dtype=torch.bfloat16)
-    zg = shrink_grouped(x, A_cat, ranks, slots, G=G, r_bucket=64, N=N)
-    for gi in range(G):
-        z = shrink(x, A_cat[:, gi * R:(gi + 1) * R], ranks[gi], slots, r_bucket=64, N=N)
-        for row, s in enumerate(slots.tolist()):
-            r = int(ranks[gi, s]) if s >= 0 else 0
-            if r:
-                rs = slice(row * N, (row + 1) * N)
-                assert math.isclose(float((zg[rs, gi * 64:gi * 64 + r] - z[rs, :r]).abs().max()), 0, abs_tol=1e-2)
-
-
-@pytest.mark.interp
-def test_interp_muxlinear_grouped_qkv_matches_reference(monkeypatch):
-    from torch import nn
-
-    from loramux import AdapterPool, lora_batch, patch_model
-    from loramux.ops import custom_op
-
-    class QKV(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.to_q, self.to_k, self.to_v = nn.Linear(D_IN, 24), nn.Linear(D_IN, 24), nn.Linear(D_IN, 40)
-
-        def forward(self, x):
-            return torch.cat([self.to_q(x), self.to_k(x), self.to_v(x)], -1)
-
-    torch.manual_seed(0)
-    m = QKV()
-    shapes = {"to_q": (D_IN, 24), "to_k": (D_IN, 24), "to_v": (D_IN, 40)}
-    pool = AdapterPool(shapes, slots=3, r_max=16, device="cpu", dtype=torch.float32)
-    pool.add_group("qkv", ["to_q", "to_k", "to_v"])
-    g = torch.Generator().manual_seed(3)
-    pool.register("a", {k: (torch.randn(8, di, generator=g), torch.randn(do, 8, generator=g)) for k, (di, do) in shapes.items()})
-    pool.register("b", {k: (torch.randn(16, di, generator=g), torch.randn(do, 16, generator=g))
-                        for k, (di, do) in shapes.items() if k != "to_k"})   # to_k not targeted: rank 0 there
-    for k in "ab":
-        pool.ensure_resident(k)
-    patch_model(m, ["to_"], pool)
-    x = torch.randn(3, 5, D_IN)
-    meta = lambda: build_meta([pool.slot_of["a"], -1, pool.slot_of["b"]], [1., 1., .5],
-                              rank_of_slot=pool.slot_rank, r_max=16)
-    with lora_batch(meta()):
-        ref = m(x)
-    monkeypatch.setattr(custom_op, "TRITON_ON_CPU", True)
-    calls = []
-    import loramux.ops.triton_shrink as ts
-    orig = ts.shrink_grouped
-    monkeypatch.setattr(ts, "shrink_grouped", lambda *a, **k: calls.append(1) or orig(*a, **k))
-    mt = meta()
-    with lora_batch(mt):
-        out = m(x)
-    assert calls == [1] and not mt._zcache            # one grouped shrink for q, k, v; workspace released
-    torch.testing.assert_close(out, ref, atol=1e-4, rtol=1e-4)

@@ -201,7 +201,7 @@ Environment for every L1/L2 task: `. /home/claude/.venv-loramux/bin/activate`. C
 - Uniform-row mode (decision 2) and varlen mode, per-layer rank with `rank == 0` early exit (decision 3), `r_bucket` constexpr (decision 4).
 - `Z` workspace via `torch.empty` (never `zeros`): every row of an active tile is written, and expand never reads rows of slot −1 or columns ≥ rank. Option `z_dtype` fp32 (default) or bf16.
 - `@triton.autotune` over BM ∈ {32, 64, 128}, BN ∈ {64, 128, 256}, BK ∈ {32, 64}, warps {4, 8}, stages {3, 4}, keyed on `(d_in, d_out, RB)`. Autotune is disabled under `TRITON_INTERPRET=1` (single config).
-- Grouped shrink: `shrink_grouped(x, A_list, ...)` computes Z for several linears that share `x` in one pass (A concatenated along rank, via the pool's group buffers). MuxLinear uses it in eager mode only; under `torch.compiler.is_compiling()` it falls back to per-linear shrink.
+- ~~Grouped shrink~~ dropped in L2 review: eager-only (the compiled serving path never used it) and never wired by `integrations.diffusers.enable`. Revisit with the fused epilogue (L3) if profiling shows x re-reads matter.
 - Custom op signature updated; `register_fake` kept.
 - Tests: interpreter (fp32) sweep of ragged and uniform shapes, ranks {8, 16, 64, 128} in one batch, rank-0 layers, slot −1, `N % BM != 0`, `d_out % BN != 0`, `d_in % BK != 0`; GPU-marked bf16 versions with rel err ≤ 2e-3.
 

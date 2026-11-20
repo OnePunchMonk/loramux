@@ -4,8 +4,7 @@ Canonical adapter: {layer_key: (A[r, d_in], B[d_out, r])}, alpha/r already folde
 
 Arena (TASKS L2.3). One tensor `arena[S, slot_elems]` of the storage dtype; one slot's whole adapter is
 `arena[slot]`, contiguous. Per layer, `A[k] = arena[:, offA:offA+R*d_in].view(S, R, d_in)` and
-`B[k] = arena[:, offB:offB+d_out*R].view(S, d_out, R)` are views (the kernels take strides). Layers grouped with
-`add_group` (linears sharing their input) have their A regions adjacent, so `group_buffers` is a view too.
+`B[k] = arena[:, offB:offB+d_out*R].view(S, d_out, R)` are views (the kernels take strides).
 FP8 pools (dtype float8_e4m3fn) keep fp32 per-row scales (L1.5 format) in `sarena[S, scale_elems]` with views
 `SA[k] [S, R]` and `SB[k] [S, d_out]`.
 
@@ -97,7 +96,6 @@ class AdapterPool:
         self.fp8 = dtype == torch.float8_e4m3fn
         self._cuda = str(device).startswith("cuda")
         self.layer_shapes: dict[str, tuple[int, int]] = {}
-        self._groups: dict[str, list[str]] = {}
         self._layout: dict[str, tuple[int, int, int, int, int]] = {}   # k -> (offA, offB, offSA, offSB, idx)
         self.slot_elems = self.scale_elems = 0
         self.arena = torch.zeros(slots, 0, dtype=dtype, device=device)
@@ -143,42 +141,15 @@ class AdapterPool:
             self.layer_shapes.update(new)
             self._relayout()
 
-    def add_group(self, name: str, keys: list[str]):
-        """Linears that share their input (q/k/v): their A regions become adjacent so one grouped shrink
-        (`group_buffers`) reads x once."""
-        keys = list(keys)
-        if name in self._groups:
-            raise ValueError(f"group {name} already exists")
-        if len(keys) < 2 or len(set(keys)) != len(keys):
-            raise ValueError(f"group {name}: needs >= 2 distinct layers, got {keys}")
-        missing = [k for k in keys if k not in self.layer_shapes]
-        if missing:
-            raise KeyError(f"group {name}: unknown layers {missing}")
-        if len({self.layer_shapes[k][0] for k in keys}) != 1:
-            raise ValueError(f"group {name}: layers must share d_in")
-        if any(self.group_of(k) is not None for k in keys):
-            raise ValueError(f"group {name}: a layer is already grouped")
-        self._groups[name] = keys
-        self._relayout()
-
     def _relayout(self):
         R = self.r_max
-        grouped = [k for ks in self._groups.values() for k in ks]
-        order = grouped + [k for k in self.layer_shapes if k not in set(grouped)]
+        order = list(self.layer_shapes)
         layout, off, soff = {}, 0, 0
-        units = [ks for ks in self._groups.values()] + [[k] for k in order[len(grouped):]]
-        for unit in units:                        # A regions of a unit packed back to back, then its B regions
-            off, soff = _al(off, _EALIGN), _al(soff, _EALIGN)
-            offA, offSA = {}, {}
-            for k in unit:
-                offA[k], offSA[k] = off, soff
-                off += R * self.layer_shapes[k][0]
-                soff += R
-            for k in unit:
-                off, soff = _al(off, _EALIGN), _al(soff, _EALIGN)
-                layout[k] = (offA[k], off, offSA[k], soff, order.index(k))
-                off += self.layer_shapes[k][1] * R
-                soff += self.layer_shapes[k][1]
+        for idx, (k, (di, do)) in enumerate(self.layer_shapes.items()):   # per layer: A region, then B region
+            offA, offSA = _al(off, _EALIGN), _al(soff, _EALIGN)
+            offB, offSB = _al(offA + R * di, _EALIGN), _al(offSA + R, _EALIGN)
+            layout[k] = (offA, offB, offSA, offSB, idx)
+            off, soff = offB + do * R, offSB + do
         self._sync_side_stream()
         old = (self._layout, self.A, self.B, self.SA, self.SB, self.rank)
         S = self.S
@@ -223,23 +194,6 @@ class AdapterPool:
     def scales(self, k):
         """(a_scale [S, R], b_scale [S, d_out]) fp32 for an FP8 pool, else None."""
         return (self.SA[k], self.SB[k]) if self.fp8 else None
-
-    def group_of(self, k):
-        """(group name, index in the group, group size) or None."""
-        for name, keys in self._groups.items():
-            if k in keys:
-                return name, keys.index(k), len(keys)
-        return None
-
-    def group_buffers(self, name):
-        """(A_cat [S, G*R, d_in], ranks int32 [G, S], a_scale_cat [S, G*R] or None), all views."""
-        keys = self._groups[name]
-        G, R, S = len(keys), self.r_max, self.S
-        di = self.layer_shapes[keys[0]][0]
-        oA, _, oSA, _, idx = self._layout[keys[0]]
-        A_cat = self.arena[:, oA:oA + G * R * di].view(S, G * R, di)
-        sa = self.sarena[:, oSA:oSA + G * R] if self.fp8 else None
-        return A_cat, self.rank_all[idx:idx + G], sa
 
     def slot_rank(self, slot: int) -> int:
         return self.rank_host[slot]

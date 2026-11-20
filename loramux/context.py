@@ -63,7 +63,6 @@ class BatchLoRAMeta:
     per_row_2d: bool = False          # 2-D x [rows, d] means one token per row (e.g. temb linears in DiTs)
     _views: dict = field(default_factory=dict, repr=False)
     _rows: dict = field(default_factory=dict, repr=False)   # (rows, layout) -> RowTensors
-    _zcache: dict = field(default_factory=dict, repr=False)  # grouped-shrink workspaces (eager only)
 
     @property
     def n_req(self) -> int:

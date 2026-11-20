@@ -1,8 +1,8 @@
 """Segmented expand-add, in place: Y[rows, n-tile] += scale[row] * Z[rows, :rank] @ B[slot, n-tile, :rank].T.
 
-Same modes, early exits and rank masks as triton_shrink (TASKS decisions 2-4). Z may be a column slice of a
-grouped-shrink workspace (any row stride, unit column stride). FP8W: B is float8_e4m3fn with an fp32 scale per
-B row (= per output column of Y), upcast in registers and applied after the dot.
+Same modes, early exits and rank masks as triton_shrink (TASKS decisions 2-4). Z needs a unit column stride
+(any row stride). FP8W: B is float8_e4m3fn with an fp32 scale per B row (= per output column of Y), upcast in
+registers and applied after the dot.
 """
 from __future__ import annotations
 

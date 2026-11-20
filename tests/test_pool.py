@@ -177,23 +177,13 @@ def test_cpu_descriptor_path_equals_per_tensor_copies_from_blob(tmp_path):
         _check_slot(p, "a", ad)                      # bf16 payload cast into an fp32 arena by the scatter
 
 
-def test_add_layers_and_group_relayout_keep_contents():
+def test_add_layers_relayout_keeps_contents():
     p = AdapterPool({"q": SH["q"], "o": SH["o"]}, slots=2, r_max=8, device="cpu", dtype=torch.float32)
     ad = _rand_ad({"q": 3, "o": 4})
     p.register("a", ad)
     p.ensure_resident("a")
     p.add_layers({"k": SH["k"], "v": SH["v"]})
-    p.add_group("qkv", ["q", "k", "v"])
     _check_slot(p, "a", ad)
-    A_cat, ranks, sa = p.group_buffers("qkv")
-    assert A_cat.shape == (2, 24, 8) and ranks.shape == (3, 2) and sa is None
-    s = p.slot_of["a"]
-    assert torch.equal(A_cat[s, :3], ad["q"][0]) and ranks[:, s].tolist() == [3, 0, 0]
-    assert p.group_of("k") == ("qkv", 1, 3) and p.group_of("o") is None
-    with pytest.raises(ValueError, match="d_in"):
-        p.add_group("bad", ["q", "o"])
-    with pytest.raises(ValueError, match="already grouped"):
-        p.add_group("again", ["q", "k"])
 
 
 def test_fp8_pool_register_and_blob_agree(tmp_path):
