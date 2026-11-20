@@ -4,15 +4,14 @@ import pytest
 import torch
 
 from loramux.blob import ALIGN, blob_nbytes, read_blob, read_header, write_blob
+from tests.helpers import rand_adapter
 
 LAYERS = [("blocks.0.attn.to_q", 64, 48, 8), ("blocks.0.ff.net.0", 17, 96, 3),
           ("blocks.1.to_out.0", 96, 64, 16), ("tail", 7, 5, 1)]
 
 
 def _adapter(seed: int = 0) -> dict:
-    g = torch.Generator().manual_seed(seed)
-    return {k: (torch.randn(r, d_in, generator=g), torch.randn(d_out, r, generator=g))
-            for k, d_in, d_out, r in LAYERS}
+    return rand_adapter(LAYERS, seed)
 
 
 def _bits(t: torch.Tensor) -> torch.Tensor:

@@ -2,6 +2,7 @@ import pytest
 import torch
 
 from loramux.pool import AdapterPool, composite_key
+from tests.helpers import rand_adapter
 
 
 def _pool(S=2):
@@ -85,9 +86,7 @@ SH = {"q": (8, 6), "k": (8, 6), "v": (8, 10), "o": (6, 8)}
 
 
 def _rand_ad(ranks, seed=0, dt=torch.float32):
-    g = torch.Generator().manual_seed(seed)
-    return {k: (torch.randn(r, SH[k][0], generator=g).to(dt), torch.randn(SH[k][1], r, generator=g).to(dt))
-            for k, r in ranks.items()}
+    return rand_adapter([(k, *SH[k], r) for k, r in ranks.items()], seed, dt)
 
 
 def _check_slot(p, key, ad):

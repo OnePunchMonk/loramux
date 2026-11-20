@@ -6,29 +6,15 @@ from torch import nn
 from loramux.context import lora_batch
 from loramux.layers import MuxLinear
 from loramux.metadata import build_meta
+from tests.helpers import FixedPool
 from tests.test_ops import D_IN, D_OUT, _stale_setup
-
-
-class _Pool:
-    """Minimal pool: fixed buffers for one layer."""
-    def __init__(self, A, B, rank):
-        self._b = (A, B, rank)
-
-    def has_layer(self, k):
-        return True
-
-    def buffers(self, k):
-        return self._b
-
-    def scales(self, k):
-        return None
 
 
 def _run(fused, dev, dt, N, bias, slots, scales, z_bf16=False):
     torch.manual_seed(0)
     A, B, rank = _stale_setup(dev, dt)
     base = nn.Linear(D_IN, D_OUT, bias=bias).to(dev, dt)
-    lin = MuxLinear(base, "l", _Pool(A, B, rank), z_dtype=torch.bfloat16 if z_bf16 else torch.float32, fused=fused)
+    lin = MuxLinear(base, "l", FixedPool(A, B, rank), z_dtype=torch.bfloat16 if z_bf16 else torch.float32, fused=fused)
     x = torch.randn(len(slots), N, D_IN, device=dev, dtype=dt)
     with lora_batch(build_meta(slots, scales, device=dev, r_max=128)):
         return lin(x), x, lin
@@ -57,7 +43,7 @@ def test_cpu_reference_path_equals_unfused():
 def test_fused_falls_back_without_batch_or_fp8():
     A, B, rank = _stale_setup("cpu", torch.float32)
     base = nn.Linear(D_IN, D_OUT)
-    lin = MuxLinear(base, "l", _Pool(A, B, rank), fused=True)
+    lin = MuxLinear(base, "l", FixedPool(A, B, rank), fused=True)
     x = torch.randn(2, 5, D_IN)
     torch.testing.assert_close(lin(x), base(x))   # no active batch: plain base
 

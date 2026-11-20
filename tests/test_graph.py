@@ -7,7 +7,7 @@ from loramux.context import lora_batch
 from loramux.graph import GraphRunner, StaticMeta
 from loramux.layers import MuxLinear
 from loramux.metadata import build_meta
-from tests.test_fused import _Pool
+from tests.helpers import FixedPool
 from tests.test_ops import D_IN, D_OUT, _stale_setup
 
 CAP, N = 4, 6
@@ -16,7 +16,7 @@ CAP, N = 4, 6
 def _layer(dev, dt, fused=False):
     torch.manual_seed(0)
     A, B, rank = _stale_setup(dev, dt)
-    return MuxLinear(nn.Linear(D_IN, D_OUT).to(dev, dt), "l", _Pool(A, B, rank), fused=fused)
+    return MuxLinear(nn.Linear(D_IN, D_OUT).to(dev, dt), "l", FixedPool(A, B, rank), fused=fused)
 
 
 def test_update_rewrites_in_place_and_pads_with_base():
