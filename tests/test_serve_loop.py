@@ -1,5 +1,4 @@
 import itertools
-import re
 
 import pytest
 import torch
@@ -17,8 +16,9 @@ from bench.serve_loop import (
 from bench.step_bench import linear_shapes
 from bench.synth_adapters import make_adapter
 from bench.trace.synth_trace import Request
-from loramux import AdapterPool, patch_model
+from loramux import AdapterPool
 from loramux.latency import AdapterSource
+from loramux.layers import patch_keys
 
 KEYS = ("a", "b", "c")
 
@@ -31,7 +31,7 @@ def _setup(policy, slots=4, patch=None):
         ad = make_adapter(shapes, 8, "all", seed=i)
         pool.register(k, {n: (a, b * 5.0) for n, (a, b) in ad.items()})  # big enough to change outputs
     if patch if patch is not None else policy == "mixed":
-        patch_model(model.module, ["^(?:" + "|".join(re.escape(k) for k in shapes) + ")$"], pool)
+        patch_keys(model.module, shapes, pool)
     return model, pool
 
 

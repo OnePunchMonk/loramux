@@ -1,4 +1,3 @@
-import re
 
 import pytest
 import torch
@@ -9,7 +8,8 @@ from bench.sim import SimPool, StepTable, TableCost, simulate, summarize, sweep,
 from bench.step_bench import linear_shapes
 from bench.synth_adapters import make_adapter
 from bench.trace.synth_trace import Request
-from loramux import AdapterPool, patch_model
+from loramux import AdapterPool
+from loramux.layers import patch_keys
 
 BS = (1, 2, 4, 8, 16)
 
@@ -126,7 +126,7 @@ def test_validate_against_serve_loop(table, tmp_path):
     pool = AdapterPool(shapes, slots=8, r_max=8, device="cpu", dtype=torch.float32)
     for i, k in enumerate("abcd"):
         pool.register(k, make_adapter(shapes, 8, "all", seed=i))
-    patch_model(model.module, ["^(?:" + "|".join(re.escape(k) for k in shapes) + ")$"], pool)
+    patch_keys(model.module, shapes, pool)
     tr = [_req(i, 0.05 * i, ["abcd"[i % 4]] if i % 3 else [], steps=6) for i in range(20)]
     cost = TableCost(table, "P2", adapter_bytes=10**9, **FIXED)
     served = ServeLoop(model, pool, policy="mixed", max_bs=4, clock=VirtualClock(), cost=cost).run(tr)
