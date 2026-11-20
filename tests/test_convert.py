@@ -49,7 +49,9 @@ def test_convert_register_blob_equals_register(tmp_path):
     for k in SHAPES:
         assert torch.equal(p1.A[k][s1], p2.A[k][s2])
         assert torch.equal(p1.B[k][s2], p2.B[k][s2])
-    assert int(p1.rank[s1]) == int(p2.rank[s2]) == 4
+    assert p1.slot_rank(s1) == p2.slot_rank(s2) == 4
+    for k in SHAPES:
+        assert int(p1.rank[k][s1]) == int(p2.rank[k][s2]) == canon[k][0].shape[0]   # per-layer rank
     assert p1.h2d_bytes == p2.h2d_bytes
 
 

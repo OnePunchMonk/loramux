@@ -209,7 +209,7 @@ Environment for every L1/L2 task: `. /home/claude/.venv-loramux/bin/activate`. C
 - A and B stored `float8_e4m3fn` with per-row fp32 scales (L1.5 format); upcast in registers. Same modes and masks as L2.1. Selected by the pool's storage dtype.
 - Tests: GPU-marked accuracy vs the bf16 path (FP8 isn't reliable in the interpreter; try it, and keep an interp test only if it passes deterministically).
 
-### L2.3 Pool H2D rewrite — `pool.py`, `ops/triton_scatter.py` — `todo`
+### L2.3 Pool H2D rewrite — `pool.py`, `ops/triton_scatter.py` — `review`
 - **Arena:** one tensor `arena[S, slot_elems]` per dtype. Per-layer `A_k = arena[:, offA:offA+R·d_in].view(S, R, d_in)` and `B_k` likewise `[S, d_out, R]` (views; kernels use strides). One slot's whole adapter is `arena[slot]`, contiguous.
 - **Per-layer rank** `rank[layer] → int32[S]` (decision 3). No zeroing on load.
 - **Staging ring:** `n_staging` pinned CPU buffers sized to the largest registered payload, reused round-robin; a buffer is reused only after its event completes.
