@@ -43,3 +43,14 @@ def patch_model(model: nn.Module, target_patterns: list[str], pool) -> list[str]
                 setattr(mod, cname, MuxLinear(child, full, pool))
                 keys.append(full)
     return keys
+
+
+def unpatch_model(model: nn.Module) -> list[str]:
+    """Undo patch_model: put the original linears back. Returns the restored keys."""
+    keys = []
+    for mod in list(model.modules()):
+        for cname, child in list(mod.named_children()):
+            if isinstance(child, MuxLinear):
+                setattr(mod, cname, child.base)
+                keys.append(child.layer_key)
+    return keys

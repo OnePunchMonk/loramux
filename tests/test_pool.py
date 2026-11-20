@@ -1,4 +1,6 @@
-import pytest, torch
+import pytest
+import torch
+
 from loramux.pool import AdapterPool, composite_key
 
 
@@ -52,3 +54,14 @@ def test_rank_over_rmax_rejected():
 
 def test_composite_key_order_independent():
     assert composite_key([("b", 1.0), ("a", .5)]) == composite_key([("a", .5), ("b", 1.0)])
+
+
+def test_add_layers_and_host_rank():
+    p = AdapterPool({}, slots=2, r_max=4, device="cpu")
+    p.add_layers({"l": (8, 6)})
+    p.add_layers({"l": (8, 6)})                      # idempotent
+    with pytest.raises(ValueError):
+        p.add_layers({"l": (8, 7)})
+    p.register("a", _ad(r=3))
+    p.ensure_resident("a")
+    assert p.slot_rank(p.slot_of["a"]) == 3 and p.has_layer("l")

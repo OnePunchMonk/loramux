@@ -52,6 +52,7 @@ class BatchLoRAMeta:
     r_bucket: int = 64                # host-side rank bucket (constexpr for kernels)
     seg_len: list[int] | None = None  # packed mode only: tokens per request
     bm: int = 64
+    per_row_2d: bool = False          # 2-D x [rows, d] means one token per row (e.g. temb linears in DiTs)
     _views: dict = field(default_factory=dict, repr=False)
 
     @property
@@ -60,6 +61,8 @@ class BatchLoRAMeta:
 
     def view_for(self, x: torch.Tensor) -> SegView:
         from .metadata import make_view
+        if x.dim() == 2 and self.per_row_2d and self.seg_len is None:
+            x = x.unsqueeze(1)
         d = x.shape[-1]
         if self.seg_len is not None:
             if x.dim() != 2:

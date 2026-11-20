@@ -76,11 +76,12 @@ def make_view(meta: BatchLoRAMeta, rows: int | None, N: int | None) -> SegView:
 
 
 def build_meta(req_slots, req_scales, *, cfg_layout="concat", seg_len=None, rank_of_slot=None,
-               r_max=None, device="cpu", bm=64) -> BatchLoRAMeta:
+               r_max=None, device="cpu", bm=64, per_row_2d=False) -> BatchLoRAMeta:
     """req_slots[i] = pool slot of request i (-1 = base). Everything is decided on the host.
 
     rank_of_slot(slot) -> max rank over layers; used for r_bucket = next_pow2(max active rank)
     clamped to [16, r_max]. Without it, r_bucket = r_max or 64.
+    per_row_2d: treat 2-D inputs [rows, d] as one token per row instead of raising.
     """
     slots, scales = list(req_slots), [float(s) for s in req_scales]
     if len(slots) != len(scales):
@@ -99,4 +100,5 @@ def build_meta(req_slots, req_scales, *, cfg_layout="concat", seg_len=None, rank
         if r_max is not None:
             r_bucket = min(r_bucket, r_max)
     return BatchLoRAMeta(req_slot=slots, req_scale=scales, cfg_layout=cfg_layout, device=device,
-                         any_lora=any(s >= 0 for s in slots), r_bucket=r_bucket, seg_len=seg_len, bm=bm)
+                         any_lora=any(s >= 0 for s in slots), r_bucket=r_bucket, seg_len=seg_len, bm=bm,
+                         per_row_2d=per_row_2d)

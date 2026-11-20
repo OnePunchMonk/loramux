@@ -15,11 +15,12 @@ class AdapterPool:
 
     def __init__(self, layer_shapes: dict[str, tuple[int, int]], slots: int, r_max: int,
                  device="cuda", dtype=torch.bfloat16):
-        self.layer_shapes, self.S, self.r_max = layer_shapes, slots, r_max
+        self.layer_shapes, self.S, self.r_max = dict(layer_shapes), slots, r_max
         self.device, self.dtype = device, dtype
         self.A = {k: torch.zeros(slots, r_max, di, dtype=dtype, device=device) for k, (di, do) in layer_shapes.items()}
         self.B = {k: torch.zeros(slots, do, r_max, dtype=dtype, device=device) for k, (di, do) in layer_shapes.items()}
         self.rank = torch.zeros(slots, dtype=torch.int32, device=device)
+        self.rank_host = [0] * slots         # host mirror of `rank` (max over layers), for r_bucket without a sync
         self.cpu: dict[str, dict] = {}
         self.blobs: dict[str, str] = {}      # key -> .lmx path, mapped lazily in ensure_resident
         self.slot_of: dict[str, int] = {}
@@ -33,6 +34,20 @@ class AdapterPool:
     def slot_bytes(self) -> int:
         e = torch.tensor([], dtype=self.dtype).element_size()
         return sum(self.r_max * (di + do) * e for di, do in self.layer_shapes.values())
+
+    def add_layers(self, layer_shapes: dict[str, tuple[int, int]]):
+        """Allocate buffers for layers not yet in the pool (e.g. targets discovered from a model)."""
+        for k, (di, do) in layer_shapes.items():
+            if k in self.layer_shapes:
+                if tuple(self.layer_shapes[k]) != (di, do):
+                    raise ValueError(f"layer {k}: pool has {self.layer_shapes[k]}, model has {(di, do)}")
+                continue
+            self.layer_shapes[k] = (di, do)
+            self.A[k] = torch.zeros(self.S, self.r_max, di, dtype=self.dtype, device=self.device)
+            self.B[k] = torch.zeros(self.S, do, self.r_max, dtype=self.dtype, device=self.device)
+
+    def slot_rank(self, slot: int) -> int:
+        return self.rank_host[slot]
 
     def has_layer(self, k):
         return k in self.A
@@ -109,6 +124,7 @@ class AdapterPool:
                 self.h2d_bytes += (a.numel() + b.numel()) * a.element_size()
             r_adapter = max(a.shape[0] for a, _ in ad.values())
             self.rank[slot] = r_adapter
+            self.rank_host[slot] = r_adapter
             ev = None
             if use_cuda:
                 ev = torch.cuda.Event()

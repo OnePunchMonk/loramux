@@ -185,7 +185,7 @@ Environment for every L1/L2 task: `. /home/claude/.venv-loramux/bin/activate`. C
 - `profile_steps`: `T_base(bs)`, `T_uniform(bs)`, `T_mixed(bs, k)` for bs ∈ {1,2,4,8,16}, resolutions 512² and 1024² → CSV consumed by the simulator (L2.6). Column contract documented in the module docstring.
 - Test: CPU smoke run with a toy DiT `StepTarget`.
 
-### L1.8 diffusers integration — `loramux/integrations/__init__.py`, `diffusers.py` — `todo`
+### L1.8 diffusers integration — `loramux/integrations/__init__.py`, `diffusers.py` — `review`
 - `enable(pipe, pool, targets="attn"|"all"|list[regex]) -> list[str]` patches `pipe.transformer` with `patch_model`, after registering the pool's layer shapes from the model.
 - `mixed_lora(pipe, req_slots, req_scales)` context manager: installs a forward pre-hook on the transformer that builds the step's `BatchLoRAMeta`. CFG is detected from the batch dimension at call time (decision 1); works both for pipelines that call the transformer twice (cond, uncond) and for those that concatenate.
 - `disable(pipe)` restores the original linears.

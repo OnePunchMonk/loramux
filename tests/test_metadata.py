@@ -95,3 +95,11 @@ def test_r_bucket():
     assert build_meta([-1], [1.], rank_of_slot=rk, r_max=128).r_bucket == 16  # all base
     assert build_meta([0], [1.]).r_bucket == 64
     assert build_meta([0], [1.], r_max=32).r_bucket == 32
+
+
+def test_per_row_2d_inputs():
+    x2 = torch.randn(3, 8)
+    with pytest.raises(ValueError):
+        build_meta([0, 1, -1], [1.0] * 3).view_for(x2)
+    v = build_meta([0, 1, -1], [1.0] * 3, per_row_2d=True).view_for(x2)
+    assert v.rows == 3 and v.N == 1 and v.uniform and v.slot_host == [0, 1, -1]
