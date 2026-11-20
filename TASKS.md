@@ -13,8 +13,8 @@ Status keys: `todo` · `in progress` · `review` · `done`. **Approval:** L0 is 
 | **L3** | Research-critical or cross-system work: fused GEMM epilogue, CUDA graphs, vLLM-Omni integration, running the kill test, and the verdict. | Claude **Opus high** | Owner | Owner sign-off |
 
 Rules for every level:
-- One branch per task (`l<level>/<id>-<slug>`), one PR per task. Nothing merges to `main` without the owner.
-- Tests run on Modal (`modal run modal_app.py::cpu_tests`), never on a laptop.
+- One branch per task (`l<level>/<id>-<slug>`), one PR per task. Exception: L0 ships as one branch (`l0/plumbing`) with one commit per task and a single PR. Nothing merges to `main` without the owner.
+- Tests run on Modal (`modal run modal_app.py::cpu_tests`), never on a laptop. For now no Modal runs: CPU tests run in the cloud workspace, and every PR carries an unticked checklist item for the Modal run.
 - GPU spend: estimate in `SPEND.md` before the run, actual after. Phase 1 cap 25 USD, total 200 USD.
 
 ---
