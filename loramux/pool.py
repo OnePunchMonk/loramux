@@ -233,7 +233,12 @@ class AdapterPool:
         off_w = _al(_al(n_desc * NCOL * 8, 8) + 4 * max(len(self.layer_shapes), 1), _BALIGN)
         return _al(off_w + w_bytes, 16) + 4 * s_elems
 
+    def _check_not_resident(self, key):
+        if key in self.slot_of:            # its slot would keep the old weights while the CPU tier has new ones
+            raise RuntimeError(f"adapter {key} is resident; re-register it only after it is evicted")
+
     def register(self, key: str, tensors: dict):
+        self._check_not_resident(key)
         for k, (a, b) in tensors.items():
             if k not in self.layer_shapes:
                 raise KeyError(f"adapter {key}: unknown layer {k}")
@@ -251,6 +256,7 @@ class AdapterPool:
     def register_blob(self, key: str, path):
         """CPU-tier entry backed by an .lmx file. Only the header is read now (to validate); the payload is
         mmapped and copied when ensure_resident loads it."""
+        self._check_not_resident(key)
         header = read_header(path)
         for lay in header["layers"]:
             k = lay["key"]

@@ -320,3 +320,11 @@ def test_gpu_async_load_event_and_contents():
     p.register("b", _rand_ad({"k": 3}, seed=2, dt=torch.bfloat16))
     p.ensure_resident("b")
     assert p._stream is stream          # persistent side stream
+
+
+def test_reregister_resident_key_rejected():
+    p = _pool()
+    p.register("a", _ad())
+    p.ensure_resident("a")
+    with pytest.raises(RuntimeError, match="resident"):
+        p.register("a", _ad(v=2.0))
