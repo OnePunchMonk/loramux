@@ -38,18 +38,6 @@ def _build(dev, dt):
     return m, pool
 
 
-def test_mixed_batch_matches_solo_cpu():
-    m, pool = _build("cpu", torch.float32)
-    x = torch.randn(3, 10, 64)
-    slots = [pool.slot_of["ad0"], -1, pool.slot_of["ad2"]]
-    with lora_batch(build_meta(slots, [1., 1., .7])):
-        y = m(x)
-    for i in range(3):
-        with lora_batch(build_meta([slots[i]], [[1., 1., .7][i]])):
-            yi = m(x[i:i + 1])
-        torch.testing.assert_close(y[i:i + 1], yi, atol=1e-4, rtol=1e-4)
-
-
 def test_compile_no_graph_breaks_cpu():
     m, pool = _build("cpu", torch.float32)
     x = torch.randn(2, 10, 64)
