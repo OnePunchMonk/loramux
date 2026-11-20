@@ -22,7 +22,8 @@ class MuxLinear(nn.Module):
     reference path) every linear does its own shrink through the custom op.
     """
 
-    def __init__(self, base: nn.Linear, layer_key: str, pool, z_dtype: torch.dtype = torch.float32):
+    def __init__(self, base: nn.Linear, layer_key: str, pool, z_dtype: torch.dtype = torch.float32,
+                 fused: bool = False):
         super().__init__()
         if z_dtype not in (torch.float32, torch.bfloat16):
             raise ValueError(f"z_dtype must be float32 or bfloat16, got {z_dtype}")
@@ -30,10 +31,20 @@ class MuxLinear(nn.Module):
         self.layer_key = layer_key
         self.pool = pool
         self.z_dtype = z_dtype
+        self.fused = fused   # uniform-row inputs and unquantized pool weights run base GEMM + LoRA as one kernel
 
     def forward(self, x):
-        y = self.base(x)
         m = current()
+        if self.fused and m is not None and m.any_lora and self.pool.has_layer(self.layer_key) and x.numel():
+            us = m.uniform_shape(x)
+            if us is not None and getattr(self.pool, "scales", lambda k: None)(self.layer_key) is None:
+                A, B, rank = self.pool.buffers(self.layer_key)
+                rt = m.rows_for(us[0])
+                y = torch.ops.loramux.lora_linear(x.reshape(-1, x.shape[-1]), self.base.weight, self.base.bias, A, B,
+                                                  rank, rt.slot, rt.scale, us[1], m.r_bucket,
+                                                  self.z_dtype == torch.bfloat16)
+                return y.view(*x.shape[:-1], -1)
+        y = self.base(x)
         if m is None or not m.any_lora or not self.pool.has_layer(self.layer_key) or x.numel() == 0:
             return y
         A, B, rank = self.pool.buffers(self.layer_key)
