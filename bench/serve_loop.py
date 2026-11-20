@@ -58,14 +58,6 @@ def _resident(pool, key) -> bool:
     return key in getattr(pool, "slot_of", {})
 
 
-def _ready(pool, key) -> bool:
-    """pool.is_ready(key) when the pool has it, else a resident key counts as ready."""
-    fn = getattr(pool, "is_ready", None)
-    if fn is not None:
-        return bool(fn(key))
-    return _resident(pool, key)
-
-
 def _source(pool, key) -> AdapterSource:
     if _resident(pool, key):
         return AdapterSource.GPU_HIT
@@ -74,14 +66,6 @@ def _source(pool, key) -> AdapterSource:
     if key in getattr(pool, "blobs", {}):
         return AdapterSource.DISK_HIT
     return AdapterSource.MISS
-
-
-def _payload(pool, key) -> dict:
-    """Canonical {layer: (A[r, d_in], B[d_out, r])} of a registered adapter (CPU tier or blob)."""
-    fn = getattr(pool, "_payload", None)
-    if fn is not None:
-        return fn(key)
-    return pool.cpu[key]
 
 
 def default_key_fn(req: Request) -> tuple[str | None, float]:
@@ -531,7 +515,7 @@ class ServeLoop:
         key, scale = group
         lin = self._linear_map()
         with torch.no_grad():
-            for k, (a, b) in _payload(self.pool, key).items():
+            for k, (a, b) in self.pool.canonical(key).items():
                 w = lin[k].weight
                 delta = (b.to(w.device, torch.float32) @ a.to(w.device, torch.float32)) * (sign * scale)
                 w.copy_((w.float() + delta).to(w.dtype))
@@ -608,7 +592,7 @@ class ServeLoop:
             if r.t_issue is None:
                 return False
         now = self.clock.now()
-        if now >= r.ready_at and _ready(self.pool, r.key):
+        if now >= r.ready_at and self.pool.is_ready(r.key):
             r.t_resident = max(r.ready_at, r.t_issue) if self.clock.virtual else now
             return True
         return False

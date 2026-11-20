@@ -133,8 +133,9 @@ def _run_op(c, bm) -> torch.Tensor:
     from loramux import ops  # noqa: F401  (registers loramux::lora_apply_)
     y = torch.zeros(c["T"], c["d_out"], dtype=torch.float32, device=c["x"].device)
     t = build_tiles(c["starts"], c["lens"], bm, c["x"].device)
-    torch.ops.loramux.lora_apply_(y, c["x"], c["A"], c["B"], c["rank"], c["slot"], c["scale"], t.tile_seg,
-                                  t.tile_row0, t.tile_row_end, t.bm, c["seg_start"], c["seg_len"])
+    torch.ops.loramux.lora_apply_(y, c["x"], c["A"], c["B"], c["rank"], c["slot"], c["scale"], 0, c["A"].shape[1],
+                                  seg_start=c["seg_start"], seg_len=c["seg_len"], tile_seg=t.tile_seg,
+                                  tile_row0=t.tile_row0, tile_row_end=t.tile_row_end, bm=t.bm)
     return y
 
 
@@ -155,8 +156,8 @@ def _run_interp(c, bm) -> torch.Tensor:
     y = torch.zeros(c["T"], c["d_out"], dtype=torch.float32)
     t = build_tiles(c["starts"], c["lens"], bm, "cpu")
     r_max = c["A"].shape[1]
-    z = shrink(c["x"], c["A"], c["rank"], c["slot"], t, r_max)
-    expand_add_(y, z, c["B"], c["rank"], c["slot"], c["scale"], t, r_max)
+    z = shrink(c["x"], c["A"], c["rank"], c["slot"], r_bucket=r_max, tiles=t)
+    expand_add_(y, z, c["B"], c["rank"], c["slot"], c["scale"], r_bucket=r_max, tiles=t)
     return y
 
 

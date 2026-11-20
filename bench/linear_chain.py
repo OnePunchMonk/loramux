@@ -99,13 +99,14 @@ def build_chains(*, layers: int, dim: int, rank: int, adapters: int, tokens: int
             h = lin(h)
         return h
 
-    # B1: merged weights of adapter slots[0]
+    # B1: merged weights of adapter 0 (its exact tensors, not the rank-padded slot)
+    ad0 = pool.canonical("ad0")
     merged = []
     for lin, k in zip(base, keys):
-        A, B, _ = bufs[k]
+        a, b = ad0[k]
         m = nn.Linear(dim, dim, bias=False).to(device=device, dtype=dtype).requires_grad_(False)
         with torch.no_grad():
-            m.weight.copy_(lin.weight + (B[slots[0]].float() @ A[slots[0]].float()).to(dtype))
+            m.weight.copy_(lin.weight + (b.float() @ a.float()).to(device=device, dtype=dtype))
         merged.append(m)
 
     def b1():
@@ -121,8 +122,9 @@ def build_chains(*, layers: int, dim: int, rank: int, adapters: int, tokens: int
             y = lin(h)
             for i, s in enumerate(slots):
                 y_slice = y[i]
-                buffer = h[i] @ A[s].t()
-                delta = buffer @ B[s].t()           # full-width delta
+                r = pool.layer_rank_host[k][s]
+                buffer = h[i] @ A[s, :r].t()
+                delta = buffer @ B[s, :, :r].t()    # full-width delta
                 y_slice[:] = y_slice + delta * scales[i]   # slice-assign copy
             h = y
         return h

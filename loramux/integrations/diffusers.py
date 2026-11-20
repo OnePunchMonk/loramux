@@ -2,7 +2,7 @@
 
     pool = AdapterPool({}, slots=8, r_max=64, device="cuda")
     enable(pipe, pool, "attn")                 # registers layer shapes in the pool, wraps the linears
-    pool.register_blob("a", "a.lmx"); pool.ensure_resident("a")
+    pool.register_blob("a", "a.lmx"); pool.ensure_resident("a"); pool.wait("a")  # acquire needs it loaded
     with mixed_lora(pipe, [pool.acquire("a"), -1], [1.0, 1.0]):
         pipe(...)                              # request 0 uses adapter "a", request 1 the base model
     disable(pipe)

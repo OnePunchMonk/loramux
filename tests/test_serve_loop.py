@@ -11,7 +11,6 @@ from bench.serve_loop import (
     ServeLoop,
     ToyStepModel,
     VirtualClock,
-    _ready,
     flow_sigmas,
     select_admits,
 )
@@ -151,16 +150,6 @@ def test_helpers():
     assert g == ("a", 1.0) and adm == [el[0], el[2]]
     adm, _ = select_admits("mixed", el, 3, None, 4)
     assert adm == [el[0]]
-
-    class P:
-        def __init__(self):
-            self.slot_of = {"a": 0}
-    assert _ready(P(), "a") and not _ready(P(), "b")
-
-    class Q(P):
-        def is_ready(self, k):
-            return False
-    assert not _ready(Q(), "a")
 
 
 def test_diffusers_step_model_per_row_timesteps():

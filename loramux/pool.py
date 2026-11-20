@@ -328,6 +328,19 @@ class AdapterPool:
         layers = [(lay["key"], lay["r"], lay["off_A"] // 2, lay["off_B"] // 2, 0, 0) for lay in header["layers"]]
         return _Payload(w, None, layers)
 
+    def canonical(self, key: str) -> dict:
+        """The registered adapter as {layer: (A [r, d_in], B [d_out, r])} on the CPU (dequantized for FP8 pools)."""
+        p = self._payload(key)
+        out = {}
+        for k, r, oA, oB, oSA, oSB in p.layers:
+            di, do = self.layer_shapes[k]
+            a, b = p.w[oA:oA + r * di].view(r, di), p.w[oB:oB + do * r].view(do, r)
+            if self.fp8:
+                from .compress import dequantize_fp8_rows
+                a, b = dequantize_fp8_rows(a, p.s[oSA:oSA + r]), dequantize_fp8_rows(b, p.s[oSB:oSB + do])
+            out[k] = (a, b)
+        return out
+
     # ------------------------------------------------------------------ loading --------------------------------
 
     def _descriptors(self, slot: int, p: _Payload):
