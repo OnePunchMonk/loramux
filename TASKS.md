@@ -13,6 +13,10 @@ Status keys: `todo` · `in progress` · `review` · `done`. **Approval:** all le
 | **L3** | Research-critical or cross-system work: fused GEMM epilogue, CUDA graphs, vLLM-Omni integration, running the kill test, and the verdict. | Claude **Opus high** | Owner | Owner sign-off |
 
 Rules for every level:
+- **Self-review checklist, answered in every review pass and every PR description:**
+  1. Can the current diff be minimised? If so, how? (Delete code the spec doesn't need; collapse near-duplicate paths.)
+  2. Can an existing function be reused instead of a new one? (Search `loramux/` and `bench/` before adding a helper.)
+  3. Can the tests be scoped to be concise yet complete? (Test each property once at the layer that owns it; parametrize near-duplicates; shared builders go in `tests/helpers.py`.)
 - One branch per task (`l<level>/<id>-<slug>`), one PR per task. Exception: L0 ships as one branch (`l0/plumbing`) with one commit per task and a single PR. Nothing merges to `main` without the owner.
 - Tests run on Modal (`modal run modal_app.py::cpu_tests`), never on a laptop. For now no Modal runs: CPU tests run in the cloud workspace, and every PR carries an unticked checklist item for the Modal run.
 - GPU spend: estimate in `SPEND.md` before the run, actual after. Phase 1 cap 25 USD, total 200 USD.
