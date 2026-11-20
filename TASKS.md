@@ -235,7 +235,7 @@ Environment for every L1/L2 task: `. /home/claude/.venv-loramux/bin/activate`. C
 - `validate(sim_csv, serve_csv) -> dict` (P50 error; pass if ≤ 10%).
 - Tests with analytic answers: one request → `steps × T(1)` + fixed costs; two simultaneous same-adapter requests under P1 batch together; under P1 alternating adapters incur swap costs; P3 ≤ P2 ≤ P1 latency on a contrived trace; determinism by seed.
 
-### L2.7 vLLM-Omni switch cost — `bench/vllm_omni_swap_cost.py` — `todo`
+### L2.7 vLLM-Omni switch cost — `bench/vllm_omni_swap_cost.py` — `review`
 - Read the installed vllm-omni source (`pip download vllm-omni==0.32.0 --no-deps`, unpack, read only; do not install it into the venv) to find the diffusion LoRA API (`LoRARequest`, the diffusion LoRA manager). Cite the file paths in the docstring.
 - Script: start an offline vLLM-Omni diffusion engine (Qwen-Image), register N adapters, time adapter activation/deactivation and per-request latency when alternating adapters vs repeating one. Output a CSV for the simulator's swap cost. GPU-only; there is no CPU test beyond import-guarding and argument parsing.
 
