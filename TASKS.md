@@ -197,7 +197,7 @@ Environment for every L1/L2 task: `. /home/claude/.venv-loramux/bin/activate`. C
 
 ## L2 — Opus low writes, Opus low reviews (iterate until a full pass finds nothing)
 
-### L2.1 Kernel hardening — `ops/triton_shrink.py`, `ops/triton_expand_add.py`, `ops/custom_op.py` — `review`
+### L2.1 Kernel hardening — `ops/triton_shrink.py`, `ops/triton_expand_add.py`, `ops/custom_op.py` — `done` (CPU; GPU tests pending Modal)
 - Uniform-row mode (decision 2) and varlen mode, per-layer rank with `rank == 0` early exit (decision 3), `r_bucket` constexpr (decision 4).
 - `Z` workspace via `torch.empty` (never `zeros`): every row of an active tile is written, and expand never reads rows of slot −1 or columns ≥ rank. Option `z_dtype` fp32 (default) or bf16.
 - `@triton.autotune` over BM ∈ {32, 64, 128}, BN ∈ {64, 128, 256}, BK ∈ {32, 64}, warps {4, 8}, stages {3, 4}, keyed on `(d_in, d_out, RB)`. Autotune is disabled under `TRITON_INTERPRET=1` (single config).
@@ -205,11 +205,11 @@ Environment for every L1/L2 task: `. /home/claude/.venv-loramux/bin/activate`. C
 - Custom op signature updated; `register_fake` kept.
 - Tests: interpreter (fp32) sweep of ragged and uniform shapes, ranks {8, 16, 64, 128} in one batch, rank-0 layers, slot −1, `N % BM != 0`, `d_out % BN != 0`, `d_in % BK != 0`; GPU-marked bf16 versions with rel err ≤ 2e-3.
 
-### L2.2 FP8-weight kernels — `ops/triton_*_fp8w.py` — `review`
+### L2.2 FP8-weight kernels — `ops/triton_*_fp8w.py` — `done` (CPU; GPU tests pending Modal)
 - A and B stored `float8_e4m3fn` with per-row fp32 scales (L1.5 format); upcast in registers. Same modes and masks as L2.1. Selected by the pool's storage dtype.
 - Tests: GPU-marked accuracy vs the bf16 path (FP8 isn't reliable in the interpreter; try it, and keep an interp test only if it passes deterministically).
 
-### L2.3 Pool H2D rewrite — `pool.py`, `ops/triton_scatter.py` — `review`
+### L2.3 Pool H2D rewrite — `pool.py`, `ops/triton_scatter.py` — `done` (CPU; GPU tests pending Modal)
 - **Arena:** one tensor `arena[S, slot_elems]` per dtype. Per-layer `A_k = arena[:, offA:offA+R·d_in].view(S, R, d_in)` and `B_k` likewise `[S, d_out, R]` (views; kernels use strides). One slot's whole adapter is `arena[slot]`, contiguous.
 - **Per-layer rank** `rank[layer] → int32[S]` (decision 3). No zeroing on load.
 - **Staging ring:** `n_staging` pinned CPU buffers sized to the largest registered payload, reused round-robin; a buffer is reused only after its event completes.
@@ -218,28 +218,28 @@ Environment for every L1/L2 task: `. /home/claude/.venv-loramux/bin/activate`. C
 - CPU device path: the same descriptor table applied with torch copies (tests).
 - Tests: CPU path equals the old per-tensor semantics; interpreter test of `triton_scatter`; LRU, refcount and readiness rules; staging reuse ordering; per-layer rank masks give correct results when a layer is missing from the adapter or has a different rank.
 
-### L2.4 Compile and no-sync — `ops/custom_op.py`, `layers.py`, `tests/test_compile.py` — `review`
+### L2.4 Compile and no-sync — `ops/custom_op.py`, `layers.py`, `tests/test_compile.py` — `done` (CPU; GPU tests pending Modal)
 - Zero graph breaks with `torch.compile` on (a) the toy model and (b) the tiny diffusers Qwen-Image transformer from L1.2 (CPU, `backend="aot_eager"` and `"eager"`), with mixed adapters and CFG. Inside the compiled region, MuxLinear must not touch Python lists of the meta in ways that create guards per value (pass device tensors; keep the host-side branch on `any_lora` outside or as a guard that changes once per batch).
 - Test that `forward` does no device-to-host copy: run under `torch.cuda.set_sync_debug_mode("error")` (GPU-marked).
 
-### L2.5 Serve loop — `bench/serve_loop.py` — `review`
+### L2.5 Serve loop — `bench/serve_loop.py` — `done` (CPU; GPU tests pending Modal)
 - `StepModel` protocol: `encode_text(prompts) -> embeds`, `init_latents(req) -> tensor`, `denoise(latents[rows], timesteps[rows], embeds[rows]) -> velocity` (meta set by the loop), `decode(latents) -> images`. Implementations: `ToyStepModel` (CPU, tests) and `DiffusersStepModel` (Qwen-Image / FLUX.2; real weights; per-row timesteps).
 - Loop: arrival queue from a trace (L1.3) replayed in real time (or as fast as possible with a virtual clock for tests); `ensure_resident` at arrival; admission at step boundaries only for requests whose text is encoded and whose adapter `is_ready`; continuous batching up to `max_bs`; per-row flow-matching Euler step with each request's own sigma schedule; finished rows leave immediately; VAE decode + image encode (`torchvision.io.encode_jpeg` on CUDA if available, else PIL) on a separate stream / worker; `RequestTimeline` filled for every request.
 - Policies: `mixed` (P2) and `keyed` (P1: batches only requests with the same adapter; switching adapters merges/unmerges ΔW into the base weights for real, so the swap cost is measured, not assumed).
 - Output: latency CSV (L0.3 rows) + per-step CSV `(t, bs, k_distinct, step_ms)`.
 - Tests (CPU, toy model, virtual clock): every request completes exactly once; outputs of the mixed loop equal solo generation per request; the keyed policy never mixes adapters in a step; timelines are monotonic.
 
-### L2.6 Simulator — `bench/sim/__init__.py`, `replay_sim.py` — `review`
+### L2.6 Simulator — `bench/sim/__init__.py`, `replay_sim.py` — `done` (CPU; GPU tests pending Modal)
 - Discrete-event replay of a trace with step-time tables from L1.7 (`T_base`, `T_uniform`, `T_mixed`, interpolated over bs and k). Policies P1 (adapter-keyed, `max_num_seqs`, measured swap cost), P2 (mixed; H2D time = bytes / bandwidth, hidden behind text encode as modelled), P3 (mixed with zero LoRA overhead). Same admission rules as the serve loop.
 - Outputs: throughput, P50/P90/P99 E2E per policy and ρ; per-request timelines in the L0.3 format.
 - `validate(sim_csv, serve_csv) -> dict` (P50 error; pass if ≤ 10%).
 - Tests with analytic answers: one request → `steps × T(1)` + fixed costs; two simultaneous same-adapter requests under P1 batch together; under P1 alternating adapters incur swap costs; P3 ≤ P2 ≤ P1 latency on a contrived trace; determinism by seed.
 
-### L2.7 vLLM-Omni switch cost — `bench/vllm_omni_swap_cost.py` — `review`
+### L2.7 vLLM-Omni switch cost — `bench/vllm_omni_swap_cost.py` — `done` (CPU; GPU tests pending Modal)
 - Read the installed vllm-omni source (`pip download vllm-omni==0.32.0 --no-deps`, unpack, read only; do not install it into the venv) to find the diffusion LoRA API (`LoRARequest`, the diffusion LoRA manager). Cite the file paths in the docstring.
 - Script: start an offline vLLM-Omni diffusion engine (Qwen-Image), register N adapters, time adapter activation/deactivation and per-request latency when alternating adapters vs repeating one. Output a CSV for the simulator's swap cost. GPU-only; there is no CPU test beyond import-guarding and argument parsing.
 
-### L2.8 K1 correctness harness — `bench/k1_correctness.py` — `review`
+### L2.8 K1 correctness harness — `bench/k1_correctness.py` — `done` (CPU; GPU tests pending Modal)
 - K1a: per-linear rel. error vs fp32 `torch_ref` over the shape sweep (CPU-runnable, interpreter or ref).
 - K1b: mixed batch vs solo through loramux on a real pipeline, final image PSNR.
 - K1c: loramux vs diffusers `load_lora_weights` + `set_adapters` (merged reference), same seed, 28 steps; PSNR + LPIPS (`lpips` package, optional extra).
@@ -250,11 +250,11 @@ Environment for every L1/L2 task: `. /home/claude/.venv-loramux/bin/activate`. C
 
 | ID | Task |
 |---|---|
-| L3.1 | v2 kernel: LoRA expand fused into the base GEMM epilogue (uniform-row mode), interpreter-tested, GPU-marked perf test |
-| L3.2 | CUDA graphs per batch-size bucket with fixed-capacity metadata buffers |
-| L3.3 | vLLM-Omni integration: `--diffusion-lora-mode mixed` patch against vllm-omni 0.32 + loramux-side adapter; drafted PR + RFC #6239 comment (not posted) |
-| L3.4 | Kill-test orchestration on Modal: K1/K2/K3 runner, bar evaluation, roofline comparison, `RESULTS_killtest.md` writer (verdict logic tested on synthetic CSVs; GPU run left for the owner) |
-| L3.5 | Phase 2b evaluation: bars L1–L5 / P1–P3 from CSVs, lossy-gate decisions, `RESULTS_latency.md` writer |
+| L3.1 | v2 kernel: LoRA expand fused into the base GEMM epilogue (uniform-row mode), interpreter-tested, GPU-marked perf test — `done` (CPU); GPU perf test pending Modal |
+| L3.2 | CUDA graphs per batch-size bucket with fixed-capacity metadata buffers — `done` (CPU metadata path); capture/replay test pending Modal |
+| L3.3 | vLLM-Omni integration: `--diffusion-lora-mode mixed` patch against vllm-omni 0.32 + loramux-side adapter; drafted PR + RFC #6239 comment (not posted) — `done` against stubs; not run against a real vllm_omni install |
+| L3.4 | Kill-test orchestration on Modal: K1/K2/K3 runner, bar evaluation, roofline comparison, `RESULTS_killtest.md` writer (verdict logic tested on synthetic CSVs; GPU run left for the owner) — `done` |
+| L3.5 | Phase 2b evaluation: bars L1–L5 / P1–P3 from CSVs, lossy-gate decisions, `RESULTS_latency.md` writer; `bench/payload_bench.py` and `bench/lossy_quality.py` produce its payload and lossy CSVs — `done` |
 
 ## Dependency order
 
