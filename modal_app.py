@@ -80,6 +80,26 @@ def bench_cpu(script: str, args: str = "") -> dict:
     return {"returncode": rc, "copied_from_work_results": _persist_results()}
 
 
+@app.function(image=base, timeout=900, cpu=2, volumes={HF: hf_vol})
+def inspect_loras(paths: str) -> int:
+    """Print LoRA key patterns for comma-separated files under /hf (CPU, header reads only)."""
+    return _run(["python", "-m", "bench.inspect_lora", *[p for p in paths.split(",") if p]])
+
+
+@app.function(image=base, timeout=1800, cpu=4, memory=16384, volumes={HF: hf_vol})
+def census(args: str) -> int:
+    """bench.linear_census on CPU (meta device; reads the model config from /hf)."""
+    import shlex
+    return _run(["python", "-m", "bench.linear_census", *shlex.split(args)])
+
+
+@app.function(image=base, timeout=1800, cpu=4, memory=16384, volumes={HF: hf_vol})
+def check_adapters(args: str) -> int:
+    """CPU dry run of the normalizer on adapter files under /hf (args: bench.check_adapters CLI string)."""
+    import shlex
+    return _run(["python", "-m", "bench.check_adapters", *shlex.split(args)])
+
+
 @app.function(image=base, timeout=7200, cpu=4, volumes={HF: hf_vol})
 def prefetch(repos: str) -> dict:
     """Download Hub repos (comma list; model and adapter repos alike) into the `loramux-hf` volume, CPU only.

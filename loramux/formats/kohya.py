@@ -11,7 +11,7 @@ from ._common import split_entries
 
 def matches(sd) -> bool:
     return any(k.startswith(("lora_unet_", "lora_transformer_")) for k in sd) or (
-        any(".lora_down." in k for k in sd) and not any(k.startswith("diffusion_model.") for k in sd))
+        any((".lora_down." in k or ".lora.down." in k) for k in sd) and not any(k.startswith("diffusion_model.") for k in sd))
 
 
 def parse(sd):

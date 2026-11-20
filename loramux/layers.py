@@ -18,7 +18,8 @@ class MuxLinear(nn.Module):
     """
 
     def __init__(self, base: nn.Linear, layer_key: str, pool, z_dtype: torch.dtype = torch.float32,
-                 fused: bool = False):
+                 fused: bool = False, in_slice: tuple[int, int] | None = None,
+                 out_slice: tuple[int, int] | None = None):
         super().__init__()
         if z_dtype not in (torch.float32, torch.bfloat16):
             raise ValueError(f"z_dtype must be float32 or bfloat16, got {z_dtype}")
@@ -27,10 +28,15 @@ class MuxLinear(nn.Module):
         self.pool = pool
         self.z_dtype = z_dtype
         self.fused = fused   # uniform-row inputs and unquantized pool weights run base GEMM + LoRA as one kernel
+        # Column windows for fused projections where the adapter covers only part of the layer, e.g. FLUX.2
+        # single-stream `to_qkv_mlp_proj` (attention LoRA = the q/k/v output columns only) and `to_out` (the
+        # attention input columns only). The pool stores this layer at the window's width; the kernels run on
+        # strided views, so the untouched columns cost nothing.
+        self.in_slice, self.out_slice = in_slice, out_slice
 
     def forward(self, x):
         m = current()
-        if self.fused and m is not None and m.any_lora and self.pool.has_layer(self.layer_key) and x.numel():
+        if self.fused and self.in_slice is None and self.out_slice is None and m is not None and m.any_lora and self.pool.has_layer(self.layer_key) and x.numel():
             us = m.uniform_shape(x)
             if us is not None and getattr(self.pool, "scales", lambda k: None)(self.layer_key) is None:
                 A, B, rank = self.pool.buffers(self.layer_key)
@@ -46,6 +52,10 @@ class MuxLinear(nn.Module):
         sc = self.pool.scales(self.layer_key) if hasattr(self.pool, "scales") else None
         sa, sb = sc if sc is not None else (None, None)
         y2, x2 = y.view(-1, y.shape[-1]), x.reshape(-1, x.shape[-1])
+        if self.out_slice is not None:
+            y2 = y2[:, self.out_slice[0]:self.out_slice[1]]
+        if self.in_slice is not None:
+            x2 = x2[:, self.in_slice[0]:self.in_slice[1]]
         z_bf16 = self.z_dtype == torch.bfloat16
         us = m.uniform_shape(x)
         if us is not None:
@@ -69,20 +79,23 @@ def select_linears(model: nn.Module, patterns: list[str]) -> dict[str, tuple[int
             if isinstance(m, nn.Linear) and any(p.search(n) for p in pats)}
 
 
-def patch_keys(model: nn.Module, keys, pool, **mux_kwargs) -> list[str]:
+def patch_keys(model: nn.Module, keys, pool, slices=None, **mux_kwargs) -> list[str]:
     """patch_model on exactly these qualified names."""
-    return patch_model(model, ["^(?:" + "|".join(re.escape(k) for k in keys) + ")$"], pool, **mux_kwargs)
+    return patch_model(model, ["^(?:" + "|".join(re.escape(k) for k in keys) + ")$"], pool, slices=slices,
+                       **mux_kwargs)
 
 
-def patch_model(model: nn.Module, target_patterns: list[str], pool, **mux_kwargs) -> list[str]:
-    """Replace linears whose qualified name matches any regex; return their keys. mux_kwargs go to MuxLinear."""
+def patch_model(model: nn.Module, target_patterns: list[str], pool, slices=None, **mux_kwargs) -> list[str]:
+    """Replace linears whose qualified name matches any regex; return their keys. mux_kwargs go to MuxLinear.
+    slices: optional {key: (in_slice, out_slice)} column windows (see MuxLinear)."""
     pats = [re.compile(p) for p in target_patterns]
     keys = []
     for name, mod in list(model.named_modules()):
         for cname, child in list(mod.named_children()):
             full = f"{name}.{cname}" if name else cname
             if isinstance(child, nn.Linear) and any(p.search(full) for p in pats):
-                setattr(mod, cname, MuxLinear(child, full, pool, **mux_kwargs))
+                ins, outs = (slices or {}).get(full, (None, None))
+                setattr(mod, cname, MuxLinear(child, full, pool, in_slice=ins, out_slice=outs, **mux_kwargs))
                 keys.append(full)
     return keys
 

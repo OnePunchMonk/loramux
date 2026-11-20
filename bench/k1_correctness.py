@@ -230,15 +230,19 @@ def run_pipeline_checks(a, checks) -> list[dict]:  # pragma: no cover - needs a 
     from loramux.integrations.diffusers import disable, enable, mixed_lora
 
     device = "cuda"
-    pipe = load_pipeline(a.model_id, device)
+    dtype = {"bf16": torch.bfloat16, "fp32": torch.float32}[a.dtype]
+    if dtype == torch.float32:   # full fp32: no TF32 in cuBLAS / cuDNN either
+        torch.backends.cuda.matmul.allow_tf32 = False
+        torch.backends.cudnn.allow_tf32 = False
+    pipe = load_pipeline(a.model_id, device, dtype)
     km = _keymap(a.kind, pipe.transformer)
     names = [f"ad{i}" for i in range(len(a.adapters))]
     canon = {}
     for n, path in zip(names, a.adapters):
         sd, cfg = load_lora(path)
-        canon[n], _ = normalize(sd, km, config=cfg)
+        canon[n], _ = normalize(sd, km, config=cfg, assume_alpha_eq_rank=a.assume_alpha_eq_rank)
     r_max = max(t[0].shape[0] for c in canon.values() for t in c.values())
-    pool = AdapterPool({}, slots=len(names), r_max=r_max, device=device, dtype=torch.bfloat16)
+    pool = AdapterPool({}, slots=len(names), r_max=r_max, device=device, dtype=dtype)
     enable(pipe, pool, a.targets)
     for n in names:
         pool.register(n, canon[n])
@@ -264,6 +268,17 @@ def run_pipeline_checks(a, checks) -> list[dict]:  # pragma: no cover - needs a 
         for i, r in enumerate(reqs):
             rows.append({"check": "K1b", "status": "ok", "request": i, "adapter": r, "prompt_idx": i % len(a.prompts),
                              "scale": a.scale, "psnr": psnr(mixed[i], solo_img(r, i % len(a.prompts), seeds[i]))})
+    if "ctrl_same" in checks:
+        # Control: all rows use ONE adapter. Separates batching noise from the mixed-adapter path.
+        reqs = [names[0]] * 5
+        prompts = [a.prompts[i % len(a.prompts)] for i in range(len(reqs))]
+        seeds = [a.seed + i for i in range(len(reqs))]
+        with mixed_lora(pipe, [slot[r] for r in reqs], [a.scale] * len(reqs)):
+            same = _gen(pipe, prompts, seeds, a, device)
+        for i, r in enumerate(reqs):
+            rows.append({"check": "CTRL_same", "status": "ok", "request": i, "adapter": r,
+                             "prompt_idx": i % len(a.prompts), "scale": a.scale,
+                             "psnr": psnr(same[i], solo_img(r, i % len(a.prompts), seeds[i]))})
     if "k1c" in checks:
         ours = {(n, j): solo_img(n, j, a.seed + j) for n in names for j in range(len(a.prompts))}
         disable(pipe)
@@ -278,6 +293,18 @@ def run_pipeline_checks(a, checks) -> list[dict]:  # pragma: no cover - needs a 
             pipe.delete_adapters(n)
     else:
         disable(pipe)
+    if "ctrl_base" in checks:
+        # Control: plain diffusers, no loramux and no adapter. Batch of 5 vs each request alone = the bf16
+        # batch-composition noise floor that K1b's 45 dB bar has to clear.
+        disable(pipe)
+        n_req = 5
+        prompts = [a.prompts[i % len(a.prompts)] for i in range(n_req)]
+        seeds = [a.seed + i for i in range(n_req)]
+        batch = _gen(pipe, prompts, seeds, a, device)
+        for i in range(n_req):
+            alone = _gen(pipe, [prompts[i]], [seeds[i]], a, device)[0]
+            rows.append({"check": "CTRL_base", "status": "ok", "request": i, "adapter": "none",
+                             "prompt_idx": i % len(a.prompts), "scale": 0.0, "psnr": psnr(batch[i], alone)})
     return rows
 
 
@@ -301,6 +328,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--kind", choices=("qwen_image", "flux2"), default="qwen_image")
     ap.add_argument("--adapter", action="append", default=[], dest="adapters", help="LoRA path; repeat (K1b needs 2)")
     ap.add_argument("--targets", default="all", help="loramux targets: attn | all (all matches diffusers' coverage)")
+    ap.add_argument("--assume-alpha-eq-rank", action="store_true",
+                    help="PEFT files with no alpha tensor or adapter_config: use alpha = rank (diffusers' default)")
+    ap.add_argument("--dtype", choices=("bf16", "fp32"), default="bf16",
+                    help="model + pool dtype for K1b/K1c (fp32 removes the bf16 batch-composition noise floor)")
     ap.add_argument("--scale", type=float, default=1.0)
     ap.add_argument("--prompt", action="append", default=[], dest="prompts")
     ap.add_argument("--steps", type=int, default=28)
@@ -312,7 +343,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     a = ap.parse_args(argv)
     a.checks = [c for c in a.checks.split(",") if c]
     a.paths = [p for p in a.paths.split(",") if p]
-    if bad := [c for c in a.checks if c not in ("k1a", "k1b", "k1c")]:
+    if bad := [c for c in a.checks if c not in ("k1a", "k1b", "k1c", "ctrl_same", "ctrl_base")]:
         ap.error(f"unknown check(s) {bad}")
     if bad := [p for p in a.paths if p not in PATHS]:
         ap.error(f"unknown path(s) {bad}")
@@ -326,13 +357,14 @@ def main(argv: list[str] | None = None) -> int:
     rows: list[dict] = []
     if "k1a" in a.checks:
         rows += run_k1a(SHAPE_SETS[a.shapes], paths=tuple(a.paths), bm=a.bm, seed=a.seed)
-    gpu_checks = [c for c in a.checks if c in ("k1b", "k1c")]
+    gpu_checks = [c for c in a.checks if c in ("k1b", "k1c", "ctrl_same", "ctrl_base")]
     if gpu_checks:
         reason = (None if torch.cuda.is_available() else "skipped: needs CUDA") or \
                  (None if a.adapters else "skipped: no --adapter given") or \
                  (None if "k1b" not in gpu_checks or len(a.adapters) >= 2 else "skipped: K1b needs >= 2 adapters")
         if reason:
-            rows += [{"check": "K1" + c[2:], "status": reason} for c in gpu_checks]
+            rows += [{"check": ("K1" + c[2:]) if c.startswith("k1") else c.upper(), "status": reason}
+                     for c in gpu_checks]
         else:
             rows += run_pipeline_checks(a, gpu_checks)
     write_csv(a.out, rows, collect_env())

@@ -185,24 +185,49 @@ def token_linears(target: StepTarget, shapes: dict[str, tuple[int, int]]) -> dic
     return {k: v for k, v in shapes.items() if seen.get(k)}
 
 
+def attention_slices(model: nn.Module, shapes: dict[str, tuple[int, int]]):
+    """Column windows that make an attention-only adapter attention-only on fused projections.
+
+    FLUX.2 single-stream blocks fuse q/k/v with the MLP input (`to_qkv_mlp_proj`: [3*inner | mlp] outputs) and the
+    attention output with the MLP output (`to_out`: [inner | mlp] inputs); see diffusers transformer_flux2. Patching
+    them at full width adapts the MLP too (73% of Klein's linear FLOPs instead of the attention share).
+    Returns ({key: (in_slice, out_slice)}, shapes with the windowed widths)."""
+    mods = dict(model.named_modules())
+    slices, out = {}, dict(shapes)
+    for k, (d_in, d_out) in shapes.items():
+        parent = mods.get(k.rsplit(".", 1)[0]) if "." in k else None
+        if parent is None or not hasattr(parent, "to_qkv_mlp_proj") or not hasattr(parent, "inner_dim"):
+            continue
+        inner = int(parent.inner_dim)
+        if k.endswith(".to_qkv_mlp_proj"):
+            slices[k], out[k] = (None, (0, 3 * inner)), (d_in, 3 * inner)
+        elif k.endswith(".to_out"):
+            slices[k], out[k] = ((0, inner), None), (inner, d_out)
+    return slices, out
+
+
 class LoRAHarness:
     """Registers `n_adapters` synthetic adapters in a pool and patches the token-stream linears of `target.model`.
 
     `close()` unpatches.
     """
 
-    def __init__(self, target: StepTarget, *, targets: str, n_adapters: int, rank: int, seed: int = 0):
+    def __init__(self, target: StepTarget, *, targets: str, n_adapters: int, rank: int, seed: int = 0,
+                 attn_slices: bool = True):
         self.target, self.targets, self.n_adapters, self.rank = target, targets, n_adapters, rank
         shapes = token_linears(target, linear_shapes(target.model, targets))
         if not shapes:
             raise ValueError(f"no linear layers match targets={targets!r}")
+        slices = None
+        if targets == "attn" and attn_slices:
+            slices, shapes = attention_slices(target.model, shapes)
         self.pool = AdapterPool(shapes, slots=n_adapters, r_max=rank, device=target.device, dtype=target.dtype)
         for a in range(n_adapters):
             self.pool.register(f"ad{a}", make_adapter(shapes, rank, "all", seed=seed + a))
             self.pool.ensure_resident(f"ad{a}")
         if str(target.device).startswith("cuda"):
             torch.cuda.synchronize()
-        patch_keys(target.model, shapes, self.pool)
+        patch_keys(target.model, shapes, self.pool, slices=slices)
 
     def close(self) -> None:
         unpatch_model(self.target.model)
@@ -227,33 +252,41 @@ class LoRAHarness:
         return fn
 
 
-def _compiled(fn_factory: Callable[[], Callable], backend: str):
+def _compiled(fn_factory: Callable[[], Callable], backend: str, cudagraph: bool = False):
     torch._dynamo.reset()
+    if cudagraph:   # inductor CUDA graphs: removes per-kernel launch cost, for base and LoRA runs alike
+        return torch.compile(fn_factory(), mode="reduce-overhead")
     return torch.compile(fn_factory(), backend=backend)
+
+
+def _is_compiled(mode: str) -> bool:
+    return mode in ("compile", "cudagraph")
 
 
 def _need_warmup(modes, warmup: int) -> None:
     """torch.compile compiles on the first call; the warmup call must absorb it or it lands in the timings."""
-    if "compile" in modes and warmup < 1:
+    if any(_is_compiled(m) for m in modes) and warmup < 1:
         raise ValueError("mode 'compile' needs warmup >= 1 so compile time is excluded from the timings")
 
 
 def run_step_bench(target: StepTarget, *, bs: int = 8, k: int | None = None, rank: int = 16,
                    adapter_sets: tuple[str, ...] = ("attn", "all"), modes: tuple[str, ...] = ("eager", "compile"),
                    rows_per_req: int = 1, compile_backend: str = "inductor", rounds: int = 3, warmup: int = 3,
-                   iters: int = 10, seed: int = 0) -> list[dict]:
+                   iters: int = 10, seed: int = 0, attn_slices: bool = True) -> list[dict]:
     """Overhead of mixed-adapter LoRA on one denoise step. k = distinct adapters (default bs)."""
     _need_warmup(modes, warmup)
     seed_all(seed)
     k = k or bs
     rows: list[dict] = []
-    common = {"model": target.name, "bs": bs, "rows_per_req": rows_per_req, "k": k, "rank": rank}
+    common = {"model": target.name, "bs": bs, "rows_per_req": rows_per_req, "k": k, "rank": rank,
+              "attn_slices": attn_slices}
     with torch.no_grad():
         inputs = target.make_inputs(bs, rows_per_req)
         base_fns: dict[str, Callable] = {}
         for mode in modes:
             f = (lambda: target.forward(**inputs))
-            base_fns[mode] = _compiled(lambda f=f: f, compile_backend) if mode == "compile" else f
+            base_fns[mode] = (_compiled(lambda f=f: f, compile_backend, mode == "cudagraph")
+                              if _is_compiled(mode) else f)
         base_t = interleave({f"base/{m}": f for m, f in base_fns.items()}, rounds=rounds, warmup=warmup, iters=iters)
         base_med = {m: summarize(base_t[f"base/{m}"])["median"] for m in modes}
         for m in modes:
@@ -261,12 +294,13 @@ def run_step_bench(target: StepTarget, *, bs: int = 8, k: int | None = None, ran
             rows.append(dict(common, mode=m, adapters="base", median_ms=s["median"], p90_ms=s["p90"],
                              mean_ms=s["mean"], n=s["n"], overhead_pct=0.0))
         for aset in adapter_sets:
-            h = LoRAHarness(target, targets=aset, n_adapters=min(k, bs), rank=rank, seed=seed)
+            h = LoRAHarness(target, targets=aset, n_adapters=min(k, bs), rank=rank, seed=seed, attn_slices=attn_slices)
             try:
                 fns = {}
                 for mode in modes:
                     fn = h.step_fn(inputs, bs, k, rows_per_req)
-                    fns[mode] = _compiled(lambda fn=fn: fn, compile_backend) if mode == "compile" else fn
+                    fns[mode] = (_compiled(lambda fn=fn: fn, compile_backend, mode == "cudagraph")
+                                 if _is_compiled(mode) else fn)
                 t = interleave(fns, rounds=rounds, warmup=warmup, iters=iters)
             finally:
                 h.close()
@@ -288,6 +322,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--rank", type=int, default=16)
     ap.add_argument("--cfg", action="store_true", help="2 rows per request (concat CFG layout)")
     ap.add_argument("--modes", default="eager,compile")
+    ap.add_argument("--full-width-attn", action="store_true",
+                    help="patch fused attention+MLP projections at full width (the pre-fix 'attn' set)")
     ap.add_argument("--out", default="results/k2b.csv")
     a = ap.parse_args(argv)
     if a.kind == "toy":
@@ -295,7 +331,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         target = DiffusersStepTarget(a.kind, model_id=a.model_id, subfolder=a.subfolder, resolution=a.resolution)
     rows = run_step_bench(target, bs=a.bs, rank=a.rank, modes=tuple(a.modes.split(",")),
-                          rows_per_req=2 if a.cfg else 1)
+                          rows_per_req=2 if a.cfg else 1, attn_slices=not a.full_width_attn)
     write_csv(a.out, rows, collect_env())
     return 0
 

@@ -160,3 +160,11 @@ def test_split_not_tiling_b_rows_raises():
     gap = lambda m: [("blocks.0.q", slice(0, 2)), ("blocks.0.k", slice(3, 7))]
     with pytest.raises(ValueError, match="tile"):
         normalize(sd, gap, config={"lora_alpha": 2})
+
+
+def test_dotted_lora_down_up_tokens():
+    """`<module>.lora.down.weight` / `.lora.up.weight` (flymy-ai, AWPortrait) parse like lora_down / lora_up."""
+    sd = {"transformer.blocks.0.x.lora.down.weight": torch.ones(2, 3),
+          "transformer.blocks.0.x.lora.up.weight": torch.ones(5, 2)}
+    out, rep = normalize(sd, lambda m: m if m.startswith("blocks.") else None, assume_alpha_eq_rank=True)
+    assert rep["format"] == "kohya" and out["blocks.0.x"][0].shape == (2, 3) and out["blocks.0.x"][1].shape == (5, 2)

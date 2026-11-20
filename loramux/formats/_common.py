@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import re
 
-# One entry per low-rank factor: <module>.<token>[.<adapter name>].weight
-LORA_KEY = re.compile(r"^(?P<mod>.+)\.(?P<tok>lora_A|lora_B|lora_down|lora_up)(?:\.[^.]+)?\.weight$")
-A_TOKENS = ("lora_A", "lora_down")
+# One entry per low-rank factor: <module>.<token>[.<adapter name>].weight (`lora.down`/`lora.up` is the
+# dotted spelling some trainers write, e.g. flymy-ai/qwen-image-realism-lora)
+LORA_KEY = re.compile(r"^(?P<mod>.+)\.(?P<tok>lora_A|lora_B|lora_down|lora_up|lora\.down|lora\.up)(?:\.[^.]+)?\.weight$")
+A_TOKENS = ("lora_A", "lora_down", "lora.down")
 
 UNSUPPORTED = (
     ("lokr_", "LoKr"),
