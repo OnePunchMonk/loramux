@@ -2,7 +2,8 @@
 
 Same modes, early exits and rank masks as triton_shrink (TASKS decisions 2-4). Z needs a unit column stride
 (any row stride). FP8W: B is float8_e4m3fn with an fp32 scale per B row (= per output column of Y), upcast in
-registers and applied after the dot.
+registers and applied after the dot. The dot runs in B's dtype (y's for FP8W), so an fp32 y does not
+turn the bf16 path into a TF32 one.
 """
 from __future__ import annotations
 
@@ -46,7 +47,7 @@ def _expand_kernel(Y, Z, B, SB, rank_ptr, slot_ptr, scale_ptr, tile_seg, tile_r0
     z = tl.load(Z + rows64[:, None] * stride_zm + rc[None, :], mask=rmask[:, None] & kmask[None, :], other=0.0)
     b = tl.load(B + slot64 * stride_bs + cols[None, :] * stride_bn + rc[:, None],
                 mask=cmask[None, :] & kmask[:, None], other=0.0)
-    cdt = Y.dtype.element_ty
+    cdt = Y.dtype.element_ty if FP8W else B.dtype.element_ty   # the weights' dtype, not y's (K1a uses fp32 y)
     acc = tl.dot(z.to(cdt), b.to(cdt), out_dtype=tl.float32)
     if FP8W:
         sb = tl.load(SB + slot64 * stride_sbs + cols, mask=cmask, other=0.0)
