@@ -16,7 +16,10 @@ lpips = ["lpips"]
 include = ["loramux*", "bench*"]
 
 [tool.pytest.ini_options]
-markers = ["gpu: needs a CUDA GPU"]
+markers = [
+    "gpu: needs a CUDA GPU",
+    "interp: runs Triton kernels in the interpreter on CPU (fp32, small shapes; TRITON_INTERPRET=1 is set by tests/conftest.py on CPU-only hosts)",
+]
 
 [tool.ruff]
 line-length = 120

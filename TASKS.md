@@ -197,7 +197,7 @@ Environment for every L1/L2 task: `. /home/claude/.venv-loramux/bin/activate`. C
 
 ## L2 — Opus low writes, Opus low reviews (iterate until a full pass finds nothing)
 
-### L2.1 Kernel hardening — `ops/triton_shrink.py`, `ops/triton_expand_add.py`, `ops/custom_op.py` — `todo`
+### L2.1 Kernel hardening — `ops/triton_shrink.py`, `ops/triton_expand_add.py`, `ops/custom_op.py` — `review`
 - Uniform-row mode (decision 2) and varlen mode, per-layer rank with `rank == 0` early exit (decision 3), `r_bucket` constexpr (decision 4).
 - `Z` workspace via `torch.empty` (never `zeros`): every row of an active tile is written, and expand never reads rows of slot −1 or columns ≥ rank. Option `z_dtype` fp32 (default) or bf16.
 - `@triton.autotune` over BM ∈ {32, 64, 128}, BN ∈ {64, 128, 256}, BK ∈ {32, 64}, warps {4, 8}, stages {3, 4}, keyed on `(d_in, d_out, RB)`. Autotune is disabled under `TRITON_INTERPRET=1` (single config).

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import torch
 
-from .context import BatchLoRAMeta, SegView, TileMeta
+from .context import BatchLoRAMeta, RowTensors, SegView, TileMeta
 
 
 def expand_cfg(slots, scales, layout: str, cfg: bool):
@@ -45,22 +45,39 @@ def _next_pow2(n: int) -> int:
     return 1 if n <= 1 else 1 << (n - 1).bit_length()
 
 
+def _row_lists(meta: BatchLoRAMeta, rows: int):
+    n = meta.n_req
+    if rows == n:
+        return list(meta.req_slot), list(meta.req_scale)
+    if rows == 2 * n:
+        return expand_cfg(meta.req_slot, meta.req_scale, meta.cfg_layout, True)
+    raise ValueError(
+        f"input has {rows} rows but the batch has {n} requests; expected rows == {n} "
+        f"or rows == {2 * n} (CFG, layout {meta.cfg_layout!r})")
+
+
+def make_rows(meta: BatchLoRAMeta, rows_list) -> None:
+    """Fill meta._rows for each row count, with one device copy per dtype for all of them together."""
+    lists = [_row_lists(meta, r) for r in rows_list]
+    slots = _dev_tensor([s for sl, _ in lists for s in sl], torch.int32, meta.device)
+    scales = _dev_tensor([c for _, cl in lists for c in cl], torch.float32, meta.device)
+    off = 0
+    for r, (sl, cl) in zip(rows_list, lists):
+        meta._rows[(r, meta.cfg_layout)] = RowTensors(slots[off:off + r], scales[off:off + r], sl, cl)
+        off += r
+
+
 def make_view(meta: BatchLoRAMeta, rows: int | None, N: int | None) -> SegView:
     """Build the SegView for (rows, N). rows=None means packed (varlen) using meta.seg_len."""
-    n = meta.n_req
     if rows is None:
         slots, scales = list(meta.req_slot), list(meta.req_scale)
         lens = list(meta.seg_len)
         uniform = False
+        row_slot = _dev_tensor(slots, torch.int32, meta.device)
+        row_scale = _dev_tensor(scales, torch.float32, meta.device)
     else:
-        if rows == n:
-            slots, scales = list(meta.req_slot), list(meta.req_scale)
-        elif rows == 2 * n:
-            slots, scales = expand_cfg(meta.req_slot, meta.req_scale, meta.cfg_layout, True)
-        else:
-            raise ValueError(
-                f"input has {rows} rows but the batch has {n} requests; expected rows == {n} "
-                f"or rows == {2 * n} (CFG, layout {meta.cfg_layout!r})")
+        rt = meta.rows_for(rows)
+        slots, scales, row_slot, row_scale = rt.slot_host, rt.scale_host, rt.slot, rt.scale
         lens = [N] * rows
         uniform = True
     starts, acc = [], 0
@@ -69,8 +86,7 @@ def make_view(meta: BatchLoRAMeta, rows: int | None, N: int | None) -> SegView:
         acc += l
     dev = meta.device
     return SegView(
-        rows=len(slots), N=N, uniform=uniform,
-        row_slot=_dev_tensor(slots, torch.int32, dev), row_scale=_dev_tensor(scales, torch.float32, dev),
+        rows=len(slots), N=N, uniform=uniform, row_slot=row_slot, row_scale=row_scale,
         seg_start=_dev_tensor(starts, torch.int32, dev), seg_len=_dev_tensor(lens, torch.int32, dev),
         slot_host=slots, scale_host=scales, start_host=starts, len_host=lens, bm=meta.bm, device=dev)
 
@@ -99,6 +115,9 @@ def build_meta(req_slots, req_scales, *, cfg_layout="concat", seg_len=None, rank
         r_bucket = max(16, _next_pow2(max(active, default=0)))
         if r_max is not None:
             r_bucket = min(r_bucket, r_max)
-    return BatchLoRAMeta(req_slot=slots, req_scale=scales, cfg_layout=cfg_layout, device=device,
+    meta = BatchLoRAMeta(req_slot=slots, req_scale=scales, cfg_layout=cfg_layout, device=device,
                          any_lora=any(s >= 0 for s in slots), r_bucket=r_bucket, seg_len=seg_len, bm=bm,
                          per_row_2d=per_row_2d)
+    if seg_len is None and slots:
+        make_rows(meta, [len(slots), 2 * len(slots)])   # plain and CFG-duplicated rows, built up front
+    return meta

@@ -15,6 +15,14 @@ class TileMeta:
 
 
 @dataclass
+class RowTensors:
+    slot: torch.Tensor          # int32 [rows] (device)
+    scale: torch.Tensor         # fp32 [rows] (device)
+    slot_host: list[int]
+    scale_host: list[float]
+
+
+@dataclass
 class SegView:
     """Segmentation of one linear's input. A 'row' is one segment (one row of a 3-D input, or one request of a packed input)."""
     rows: int
@@ -54,10 +62,37 @@ class BatchLoRAMeta:
     bm: int = 64
     per_row_2d: bool = False          # 2-D x [rows, d] means one token per row (e.g. temb linears in DiTs)
     _views: dict = field(default_factory=dict, repr=False)
+    _rows: dict = field(default_factory=dict, repr=False)   # (rows, layout) -> RowTensors
+    _zcache: dict = field(default_factory=dict, repr=False)  # grouped-shrink workspaces (eager only)
 
     @property
     def n_req(self) -> int:
         return len(self.req_slot)
+
+    def rows_for(self, rows: int) -> RowTensors:
+        """Per-row (slot, scale) device tensors for an input with `rows` rows (n_req or 2*n_req for CFG).
+        build_meta makes both up front, so a forward pass (also a compiled one) only does a dict lookup."""
+        key = (rows, self.cfg_layout)
+        t = self._rows.get(key)
+        if t is None:
+            from .metadata import make_rows
+            make_rows(self, [rows])
+            t = self._rows[key]
+        return t
+
+    def uniform_shape(self, x: torch.Tensor) -> tuple[int, int] | None:
+        """(rows, N) for uniform-row inputs, None for packed (varlen) metadata. Uses static shapes only."""
+        if self.seg_len is not None:
+            return None
+        if x.dim() == 2 and self.per_row_2d:
+            return x.shape[0], 1
+        if x.dim() < 3:
+            raise ValueError(
+                f"2-D input {tuple(x.shape)} needs explicit per-request seg_len in build_meta; "
+                f"otherwise pass x as [rows, N, d]")
+        rows = x.shape[0]
+        d = x.shape[-1]
+        return rows, (x.numel() // (rows * d) if rows * d else 0)
 
     def view_for(self, x: torch.Tensor) -> SegView:
         from .metadata import make_view

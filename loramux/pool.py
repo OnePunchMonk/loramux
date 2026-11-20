@@ -29,6 +29,7 @@ class AdapterPool:
         self.free = list(range(slots))
         self.hits = self.misses = self.evictions = self.h2d_bytes = 0
         self._events: dict[str, object] = {}
+        self._groups: dict[str, tuple] = {}
 
     @property
     def slot_bytes(self) -> int:
@@ -45,6 +46,30 @@ class AdapterPool:
             self.layer_shapes[k] = (di, do)
             self.A[k] = torch.zeros(self.S, self.r_max, di, dtype=self.dtype, device=self.device)
             self.B[k] = torch.zeros(self.S, do, self.r_max, dtype=self.dtype, device=self.device)
+
+    def add_group(self, name: str, keys: list[str]):
+        """Linears that share their input (q/k/v): store their A stacks adjacent so one grouped shrink reads x once."""
+        dims = {self.layer_shapes[k][0] for k in keys}
+        if len(dims) != 1 or len(keys) < 2:
+            raise ValueError(f"group {name}: needs >= 2 layers with the same d_in, got {keys}")
+        if any(self.group_of(k) is not None for k in keys):
+            raise ValueError(f"group {name}: a layer is already grouped")
+        d_in = dims.pop()
+        cat = torch.zeros(self.S, len(keys) * self.r_max, d_in, dtype=self.dtype, device=self.device)
+        for i, k in enumerate(keys):
+            cat[:, i * self.r_max:(i + 1) * self.r_max].copy_(self.A[k])
+            self.A[k] = cat[:, i * self.r_max:(i + 1) * self.r_max]
+        self._groups[name] = (list(keys), cat)
+
+    def group_of(self, k):
+        for name, (keys, _) in self._groups.items():
+            if k in keys:
+                return name, keys.index(k), len(keys)
+        return None
+
+    def group_buffers(self, name):
+        keys, cat = self._groups[name]
+        return cat, self.rank.expand(len(keys), self.S)
 
     def slot_rank(self, slot: int) -> int:
         return self.rank_host[slot]
