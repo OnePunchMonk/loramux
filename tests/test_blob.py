@@ -114,17 +114,10 @@ def test_bad_magic_raises(tmp_path):
         read_blob(path)
 
 
-def test_empty_adapter_raises(tmp_path):
-    with pytest.raises(ValueError, match="empty"):
-        write_blob(tmp_path / "e.lmx", {}, base_model="toy")
-
-
-def test_rank_mismatch_raises(tmp_path):
-    bad = {"x": (torch.zeros(4, 8), torch.zeros(8, 3))}
-    with pytest.raises(ValueError, match="rank"):
-        write_blob(tmp_path / "m.lmx", bad, base_model="toy")
-
-
-def test_order_must_list_every_key(tmp_path):
-    with pytest.raises(ValueError, match="order"):
-        write_blob(tmp_path / "o.lmx", _adapter(), base_model="toy", order=["tail"])
+@pytest.mark.parametrize("ad,kw,match", [
+    ({}, {}, "empty"),
+    ({"x": (torch.zeros(4, 8), torch.zeros(8, 3))}, {}, "rank"),
+    (None, {"order": ["tail"]}, "order")])
+def test_write_blob_rejects(tmp_path, ad, kw, match):
+    with pytest.raises(ValueError, match=match):
+        write_blob(tmp_path / "x.lmx", _adapter() if ad is None else ad, base_model="toy", **kw)

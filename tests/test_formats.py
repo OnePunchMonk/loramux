@@ -30,20 +30,18 @@ def test_peft_missing_alpha_raises():
         normalize(_peft_sd(), _km, config={"r": 2})
 
 
-def test_peft_assume_alpha_eq_rank():
-    out, _ = normalize(_peft_sd(), _km, assume_alpha_eq_rank=True)
-    assert torch.all(out["blocks.0.x"][1].float() == 1.0)
-
-
-def test_peft_alpha_from_config():
-    out, rep = normalize(_peft_sd(r=2), _km, config={"lora_alpha": 8, "r": 2})
-    assert torch.all(out["blocks.0.x"][1].float() == 4.0)       # 8 / 2
-    assert rep["format"] == "peft" and rep["ranks"] == {"blocks.0.x": 2}
-
-
-def test_peft_rslora_scale():
-    out, _ = normalize(_peft_sd(r=4), _km, config={"lora_alpha": 8, "use_rslora": True})
-    assert torch.all(out["blocks.0.x"][1].float() == 4.0)       # 8 / sqrt(4)
+@pytest.mark.parametrize("r,alpha,kw,want", [
+    (2, None, {"assume_alpha_eq_rank": True}, 1.0),
+    (2, None, {"config": {"lora_alpha": 8, "r": 2}}, 4.0),                        # 8 / 2
+    (4, None, {"config": {"lora_alpha": 8, "use_rslora": True}}, 4.0),            # 8 / sqrt(4)
+    (2, 1.0, {"config": {"lora_alpha": 8}}, 0.5)])                                # alpha tensor wins over config
+def test_peft_alpha_precedence(r, alpha, kw, want):
+    sd = _peft_sd(r)
+    if alpha is not None:
+        sd["transformer.blocks.0.x.alpha"] = torch.tensor(alpha)
+    out, rep = normalize(sd, _km, **kw)
+    assert torch.all(out["blocks.0.x"][1].float() == want)
+    assert rep["format"] == "peft" and rep["ranks"] == {"blocks.0.x": r}
 
 
 def test_peft_alpha_pattern_and_rank_pattern():
@@ -54,13 +52,6 @@ def test_peft_alpha_pattern_and_rank_pattern():
     assert torch.all(out["blocks.1.y"][1].float() == 4.0)       # 16 / 4
     with pytest.raises(ValueError, match="rank_pattern"):
         normalize(sd, _km, config={"lora_alpha": 2, "rank_pattern": {"blocks.1.y": 8}})
-
-
-def test_alpha_tensor_wins_over_config():
-    sd = _peft_sd(2)
-    sd["transformer.blocks.0.x.alpha"] = torch.tensor(1.0)
-    out, _ = normalize(sd, _km, config={"lora_alpha": 8})
-    assert torch.all(out["blocks.0.x"][1].float() == 0.5)
 
 
 def test_kohya_missing_alpha_raises():
