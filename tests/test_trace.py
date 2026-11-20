@@ -4,7 +4,7 @@ import json
 import pytest
 
 from bench.trace import fit_zipf_exponent, load_gentd26, synth_trace, trace_stats, zipf_gini
-from bench.trace.synth_trace import gini
+from bench.trace.synth_trace import fit_zipf_mandelbrot, gini, zipf_mandelbrot_weights
 
 
 def test_gini_known_distributions():
@@ -30,22 +30,39 @@ def test_fitted_exponent_hits_gini():
     assert 0.5 < s < 3
 
 
-def test_synth_trace_matches_targets():
-    tr = synth_trace(20000, 2.0, seed=1)
+def test_zipf_mandelbrot_fit_hits_both_aggregates():
+    s, q = fit_zipf_mandelbrot(874, 0.749, 0.535)
+    w = zipf_mandelbrot_weights(874, s, q)
+    assert gini(w) == pytest.approx(0.749, abs=1e-6)
+    assert sum(sorted(w, reverse=True)[:44]) == pytest.approx(0.535, abs=1e-5)
+    assert q > 1  # plain Zipf (q=0) would give top-5% ~0.62
+    with pytest.raises(ValueError):
+        fit_zipf_mandelbrot(874, 0.749, 0.9)  # unreachable
+
+
+def test_synth_trace_matches_targets_at_scale():
+    # Median reuse 5 needs ~100k requests (see the synth_trace module docstring); all four targets are checked here.
+    tr = synth_trace(100_000, 2.0, seed=1)
     assert all(b.t_arrive > a.t_arrive for a, b in itertools.pairwise(tr))
-    assert tr[-1].t_arrive == pytest.approx(20000 / 2.0, rel=0.05)  # Poisson rate
+    assert tr[-1].t_arrive == pytest.approx(100_000 / 2.0, rel=0.02)  # Poisson rate
     s = trace_stats([r.adapters for r in tr])
     print("synthetic stats", s)
-    # tolerances (absolute): binomial noise on 20k requests is ~0.003 for lora_frac, ~0.001 for multi_frac
-    assert abs(s["lora_frac"] - 0.168) < 0.01
-    assert abs(s["multi_frac"] - 0.016) < 0.004
+    assert abs(s["lora_frac"] - 0.168) < 0.005
+    assert abs(s["multi_frac"] - 0.016) < 0.002
     assert all(len(set(r.adapters)) == len(r.adapters) == len(r.scales) for r in tr)
-    # top-5% share target 535 permille; the sample's error is reported, tolerance 0.06 absolute
-    print("top5pct_share error:", s["top5pct_share"] - 0.535)
-    assert abs(s["top5pct_share"] - 0.535) < 0.06
-    # median reuse: 20k*0.168 ~ 3400 uses over the ~600 adapters that appear -> low single digits
+    assert abs(s["top5pct_share"] - 0.535) < 0.02
+    assert abs(s["gini"] - 0.749) < 0.02
+    assert 4 <= s["median_uses"] <= 6   # target 5
+    assert s["n_unique"] > 800
+
+
+def test_short_trace_cannot_show_median_5():
+    # Documented gap: at the published trace's request count (26.8k) the same generator gives a lower median, because
+    # median reuse scales with trace length; this asserts the achieved value so nobody mistakes it for the target.
+    s = trace_stats([r.adapters for r in synth_trace(26_823, 2.0, seed=1)])
     assert 1 <= s["median_uses"] <= 3
-    assert s["n_unique"] <= 874
+    assert abs(s["lora_frac"] - 0.168) < 0.01 and abs(s["multi_frac"] - 0.016) < 0.004
+    assert s["n_unique"] < 874
 
 
 def test_synth_trace_deterministic():
