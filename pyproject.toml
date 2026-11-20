@@ -8,6 +8,15 @@ dependencies = ["torch>=2.4", "safetensors", "numpy"]
 gpu = ["triton"]
 dev = ["pytest"]
 diffusers = ["diffusers", "peft"]
+bench = ["pandas", "matplotlib", "scipy"]
+modal = ["modal"]
+
+[tool.setuptools.packages.find]
+include = ["loramux*", "bench*"]
 
 [tool.pytest.ini_options]
 markers = ["gpu: needs a CUDA GPU"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
