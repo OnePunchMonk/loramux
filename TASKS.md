@@ -239,7 +239,7 @@ Environment for every L1/L2 task: `. /home/claude/.venv-loramux/bin/activate`. C
 - Read the installed vllm-omni source (`pip download vllm-omni==0.32.0 --no-deps`, unpack, read only; do not install it into the venv) to find the diffusion LoRA API (`LoRARequest`, the diffusion LoRA manager). Cite the file paths in the docstring.
 - Script: start an offline vLLM-Omni diffusion engine (Qwen-Image), register N adapters, time adapter activation/deactivation and per-request latency when alternating adapters vs repeating one. Output a CSV for the simulator's swap cost. GPU-only; there is no CPU test beyond import-guarding and argument parsing.
 
-### L2.8 K1 correctness harness — `bench/k1_correctness.py` — `todo`
+### L2.8 K1 correctness harness — `bench/k1_correctness.py` — `review`
 - K1a: per-linear rel. error vs fp32 `torch_ref` over the shape sweep (CPU-runnable, interpreter or ref).
 - K1b: mixed batch vs solo through loramux on a real pipeline, final image PSNR.
 - K1c: loramux vs diffusers `load_lora_weights` + `set_adapters` (merged reference), same seed, 28 steps; PSNR + LPIPS (`lpips` package, optional extra).

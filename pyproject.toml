@@ -10,6 +10,7 @@ dev = ["pytest"]
 diffusers = ["diffusers==0.43.0", "peft"]
 bench = ["pandas", "matplotlib", "scipy", "pillow"]
 modal = ["modal"]
+lpips = ["lpips"]
 
 [tool.setuptools.packages.find]
 include = ["loramux*", "bench*"]
