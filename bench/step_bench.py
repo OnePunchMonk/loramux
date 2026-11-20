@@ -27,8 +27,8 @@ from torch import nn
 
 from bench.common import collect_env, interleave, seed_all, summarize, write_csv
 from bench.synth_adapters import make_adapter
-from loramux import AdapterPool, build_meta, lora_batch, patch_model
-from loramux.layers import MuxLinear
+from loramux import AdapterPool, build_meta, lora_batch
+from loramux.layers import patch_keys, select_linears, unpatch_model
 
 # bench.synth_adapters.ATTN_PAT plus the MMDiT/FLUX.2 attention projections it does not name.
 ATTN_STEP_PAT = re.compile(
@@ -163,8 +163,7 @@ def linear_shapes(model: nn.Module, targets: str) -> dict[str, tuple[int, int]]:
     """{qualified name: (d_in, d_out)} of the nn.Linear modules selected by targets ('attn' | 'all')."""
     if targets not in ("attn", "all"):
         raise ValueError("targets must be 'attn' or 'all'")
-    return {n: (m.in_features, m.out_features) for n, m in model.named_modules()
-            if isinstance(m, nn.Linear) and (targets == "all" or ATTN_STEP_PAT.search(n))}
+    return select_linears(model, [""] if targets == "all" else [ATTN_STEP_PAT.pattern])
 
 
 def token_linears(target: StepTarget, shapes: dict[str, tuple[int, int]]) -> dict[str, tuple[int, int]]:
@@ -203,13 +202,10 @@ class LoRAHarness:
             self.pool.ensure_resident(f"ad{a}")
         if str(target.device).startswith("cuda"):
             torch.cuda.synchronize()
-        patch_model(target.model, ["^(?:" + "|".join(re.escape(k) for k in shapes) + ")$"], self.pool)
+        patch_keys(target.model, shapes, self.pool)
 
     def close(self) -> None:
-        for mod in list(self.target.model.modules()):
-            for cname, child in list(mod.named_children()):
-                if isinstance(child, MuxLinear):
-                    setattr(mod, cname, child.base)
+        unpatch_model(self.target.model)
 
     def step_fn(self, inputs: dict, bs: int, k: int, rows_per_req: int = 1) -> Callable[[], torch.Tensor]:
         """Callable running one forward with bs requests spread over k distinct adapters (k=1: uniform)."""

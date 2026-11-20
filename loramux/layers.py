@@ -62,6 +62,18 @@ class MuxLinear(nn.Module):
         return y
 
 
+def select_linears(model: nn.Module, patterns: list[str]) -> dict[str, tuple[int, int]]:
+    """{qualified name: (d_in, d_out)} of the nn.Linear modules whose name matches any regex (re.search)."""
+    pats = [re.compile(p) for p in patterns]
+    return {n: (m.in_features, m.out_features) for n, m in model.named_modules()
+            if isinstance(m, nn.Linear) and any(p.search(n) for p in pats)}
+
+
+def patch_keys(model: nn.Module, keys, pool, **mux_kwargs) -> list[str]:
+    """patch_model on exactly these qualified names."""
+    return patch_model(model, ["^(?:" + "|".join(re.escape(k) for k in keys) + ")$"], pool, **mux_kwargs)
+
+
 def patch_model(model: nn.Module, target_patterns: list[str], pool, **mux_kwargs) -> list[str]:
     """Replace linears whose qualified name matches any regex; return their keys. mux_kwargs go to MuxLinear."""
     pats = [re.compile(p) for p in target_patterns]

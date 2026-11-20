@@ -32,7 +32,6 @@ from __future__ import annotations
 import argparse
 import concurrent.futures as cf
 import io
-import re
 import time
 import zlib
 from collections import deque
@@ -709,7 +708,8 @@ def main(argv: list[str] | None = None) -> int:
     from bench.step_bench import linear_shapes
     from bench.synth_adapters import make_adapter
     from bench.trace.synth_trace import synth_trace
-    from loramux import AdapterPool, patch_model
+    from loramux import AdapterPool
+    from loramux.layers import patch_keys
 
     ap = argparse.ArgumentParser(prog="python -m bench.serve_loop")
     ap.add_argument("--policy", choices=POLICIES, default="mixed")
@@ -730,7 +730,7 @@ def main(argv: list[str] | None = None) -> int:
     for i in range(a.n_adapters):
         pool.register(f"ad_{i:04d}", make_adapter(shapes, a.rank, "all", seed=i))
     if a.policy == "mixed":
-        patch_model(model.module, ["^(?:" + "|".join(re.escape(k) for k in shapes) + ")$"], pool)
+        patch_keys(model.module, shapes, pool)
     trace = synth_trace(a.n_requests, a.rate, n_adapters=a.n_adapters, lora_frac=0.8, multi_frac=0.0,
                         top5pct_share=None, seed=a.seed, steps=a.steps)
     loop = ServeLoop(model, pool, policy=a.policy, max_bs=a.max_bs,

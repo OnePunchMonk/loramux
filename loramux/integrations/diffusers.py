@@ -15,13 +15,12 @@ live for exactly one denoise step.
 """
 from __future__ import annotations
 
-import re
 from contextlib import contextmanager
 
 import torch
 from torch import nn
 
-from ..layers import patch_model, unpatch_model
+from ..layers import patch_keys, select_linears, unpatch_model
 from ..metadata import build_meta
 
 _ATTN = r"(^|\.)attn\."
@@ -56,13 +55,11 @@ def enable(pipe, pool, targets="attn") -> list[str]:
     model = _model(pipe)
     if getattr(pipe, _STATE, None) is not None or getattr(model, _STATE, None) is not None:
         raise RuntimeError("loramux is already enabled on this pipeline; call disable() first")
-    pats = [re.compile(p) for p in _patterns(targets)]
-    shapes = {n: (m.in_features, m.out_features) for n, m in model.named_modules()
-              if isinstance(m, nn.Linear) and any(p.search(n) for p in pats)}
+    shapes = select_linears(model, _patterns(targets))
     if not shapes:
         raise ValueError(f"targets {targets!r} match no nn.Linear in the model")
     pool.add_layers(shapes)
-    keys = patch_model(model, ["^(?:" + "|".join(re.escape(k) for k in shapes) + ")$"], pool)
+    keys = patch_keys(model, shapes, pool)
     setattr(model, _STATE, {"pool": pool, "keys": keys})
     return keys
 
