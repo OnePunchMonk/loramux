@@ -23,7 +23,7 @@ HF = "/hf"
 # One dependency list for every image, so test collection never fails on a missing import
 # (tests import matplotlib, pandas, scipy and diffusers at module level).
 _PY_DEPS = [
-    "torch==2.8.0", "numpy", "safetensors", "pytest",
+    "torch==2.8.0", "numpy<2", "safetensors", "pytest",
     "pandas", "matplotlib", "scipy",
     "diffusers==0.43.0", "transformers==5.23.0", "accelerate==1.16.0", "peft==0.22.0",
 ]

@@ -1,5 +1,6 @@
 """Guard against Modal test images missing a dependency the test suite imports at collection time."""
 import ast
+import re
 import pathlib
 import sys
 
@@ -16,7 +17,7 @@ def _image_deps() -> set[str]:
     tree = ast.parse((ROOT / "modal_app.py").read_text())
     for node in tree.body:
         if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == "_PY_DEPS" for t in node.targets):
-            return {ast.literal_eval(e).split("==")[0].split(">=")[0] for e in node.value.elts}
+            return {re.split(r"[=<>!~]", ast.literal_eval(e))[0] for e in node.value.elts}
     raise AssertionError("_PY_DEPS not found in modal_app.py")
 
 

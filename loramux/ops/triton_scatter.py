@@ -47,14 +47,14 @@ try:
             so = src_off + rr[:, None] * src_ld + cc[None, :]
             do = dst_off + rr[:, None] * dst_ld + cc[None, :]
             if kind == 0:
-                v = tl.load(srcW + so, mask=m)
-                tl.store(dstW + do, v.to(dstW.dtype.element_ty), mask=m)
+                vw = tl.load(srcW + so, mask=m)
+                tl.store(dstW + do, vw.to(dstW.dtype.element_ty), mask=m)
             elif kind == 1:
-                v = tl.load(srcS + so, mask=m)
-                tl.store(dstS + do, v.to(dstS.dtype.element_ty), mask=m)
+                vs = tl.load(srcS + so, mask=m)
+                tl.store(dstS + do, vs.to(dstS.dtype.element_ty), mask=m)
             else:
-                v = tl.load(srcR + so, mask=m)
-                tl.store(dstR + do, v.to(dstR.dtype.element_ty), mask=m)
+                vr = tl.load(srcR + so, mask=m)
+                tl.store(dstR + do, vr.to(dstR.dtype.element_ty), mask=m)
 
     HAVE_TRITON = True
 except Exception:  # noqa: BLE001  no triton
