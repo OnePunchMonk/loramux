@@ -54,7 +54,7 @@ def _cost(row: dict) -> float:
     return row["est. USD"] or 0.0
 
 
-def _spent(rows: list[dict], phase: str | None = None) -> float:
+def spent(rows: list[dict], phase: str | None = None) -> float:
     return sum(_cost(r) for r in rows if phase is None or r["phase"] == phase)
 
 
@@ -126,8 +126,8 @@ def check_caps(path: str | Path = "SPEND.md", phase_cap: float = 25.0, total_cap
                phase: str = DEFAULT_PHASE, *, new_est: float) -> None:
     """Raise SpendCapError if adding new_est would take the phase past phase_cap or the total past total_cap."""
     rows = read_rows(path)
-    phase_total = _spent(rows, phase) + new_est
-    total = _spent(rows) + new_est
+    phase_total = spent(rows, phase) + new_est
+    total = spent(rows) + new_est
     if phase_total > phase_cap:
         raise SpendCapError(f"phase {phase} would reach ${phase_total:.2f}, cap is ${phase_cap:.2f}")
     if total > total_cap:
