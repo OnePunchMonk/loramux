@@ -41,7 +41,7 @@ class MuxLinear(nn.Module):
             if us is not None and getattr(self.pool, "scales", lambda k: None)(self.layer_key) is None:
                 A, B, rank = self.pool.buffers(self.layer_key)
                 rt = m.rows_for(us[0])
-                y = torch.ops.loramux.lora_linear(x.reshape(-1, x.shape[-1]), self.base.weight, self.base.bias, A, B,
+                y = torch.ops.loramux.lora_linear(x.reshape(-1, x.shape[-1]).contiguous(), self.base.weight, self.base.bias, A, B,
                                                   rank, rt.slot, rt.scale, us[1], m.r_bucket,
                                                   self.z_dtype == torch.bfloat16)
                 return y.view(*x.shape[:-1], -1)
@@ -56,6 +56,8 @@ class MuxLinear(nn.Module):
             y2 = y2[:, self.out_slice[0]:self.out_slice[1]]
         if self.in_slice is not None:
             x2 = x2[:, self.in_slice[0]:self.in_slice[1]]
+        if x2.stride(-1) != 1:   # e.g. FLUX.2 packed latents reach x_embedder as a permuted view
+            x2 = x2.contiguous()
         z_bf16 = self.z_dtype == torch.bfloat16
         us = m.uniform_shape(x)
         if us is not None:

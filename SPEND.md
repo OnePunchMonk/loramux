@@ -18,3 +18,4 @@
 | 2026-11-20 | K1b controls (ctrl_base, ctrl_same) | H100 | 20 | 1.3200 |  | 12.8000 | 1 |
 | 2026-11-20 | k2b klein 1024 attn slices fix | H100 | 12 | 0.7900 |  | 13.5900 | 1 |
 | 2026-11-20 | K1b fp32 klein + controls | H100 | 20 | 1.3200 |  | 14.9100 | 1 |
+| 2026-11-20 | K1b fp32 klein + controls (retry, contiguous x) | H100 | 20 | 1.3200 |  | 16.2300 | 1 |

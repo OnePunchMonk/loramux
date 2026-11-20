@@ -55,3 +55,15 @@ def test_attention_slices_on_flux2_like_block():
     sl, sh = attention_slices(m, shapes)
     assert sl == {"attn.to_qkv_mlp_proj": (None, (0, 24)), "attn.to_out": ((0, 8), None)}
     assert sh == {"attn.to_qkv_mlp_proj": (8, 24), "attn.to_out": (8, 8)}
+
+
+def test_noncontiguous_input_is_handled():
+    """A permuted input (inner stride != 1) gives the same result as its contiguous copy."""
+    lin, pool, a, b = _setup()
+    mux = MuxLinear(lin, "l", pool)
+    x = torch.randn(2, 16, 5).transpose(1, 2)      # [2, 5, 16], inner stride 5
+    assert x.stride(-1) != 1
+    with lora_batch(build_meta([pool.slot_of["ad"], -1], [1.0, 1.0])):
+        y = mux(x)
+        y_ref = mux(x.contiguous())
+    torch.testing.assert_close(y, y_ref)
