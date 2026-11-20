@@ -11,6 +11,11 @@ _src = lambda img: img.env({"PYTHONPATH": "/work"}).add_local_dir(
 _cpu = modal.Image.debian_slim(python_version="3.11").pip_install("torch==2.8.0", "numpy", "safetensors", "pytest")
 base = _src(_cpu)
 gpu_img = _src(_cpu.pip_install("triton"))
+# Bench images add the bench extra. add_local_dir must stay last, so these are built from _cpu directly.
+bench_cpu_img = _src(_cpu.pip_install("pandas", "matplotlib", "scipy"))
+bench_gpu_img = _src(_cpu.pip_install("triton", "pandas", "matplotlib", "scipy"))
+# Unverified: recalled Modal on-demand H100 rate. Check the current price before a real run.
+H100_USD_PER_HOUR = 3.95
 
 
 @app.function(image=base, timeout=900, cpu=2)
@@ -24,4 +29,27 @@ def cpu_tests():
 def gpu_tests():
     import subprocess
     r = subprocess.run(["python", "-m", "pytest", "-q", "-m", "gpu", "/work/tests"], cwd="/work")
+    return r.returncode
+
+
+@app.function(image=bench_cpu_img, timeout=3600, cpu=2)
+def bench_cpu(script: str, args: str = "") -> int:
+    import shlex
+    import subprocess
+    r = subprocess.run(["python", "-m", script, *shlex.split(args)], check=False, cwd="/work")
+    return r.returncode
+
+
+@app.function(image=bench_gpu_img, gpu="H100!", timeout=3600)
+def bench_gpu(script: str, args: str, est_minutes: float) -> int:
+    import json
+    import shlex
+    import subprocess
+
+    from bench.common import collect_env
+    from bench.spend import check_caps, estimate
+    print(json.dumps(collect_env(), indent=2))
+    est_usd = estimate("H100", est_minutes, H100_USD_PER_HOUR)
+    check_caps("/work/SPEND.md", new_est=est_usd)  # raises SpendCapError before any GPU time is used
+    r = subprocess.run(["python", "-m", script, *shlex.split(args)], check=False, cwd="/work")
     return r.returncode
