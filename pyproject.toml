@@ -8,7 +8,7 @@ dependencies = ["torch>=2.4", "safetensors", "numpy"]
 gpu = ["triton"]
 dev = ["pytest"]
 diffusers = ["diffusers==0.43.0", "peft"]
-bench = ["pandas", "matplotlib", "scipy"]
+bench = ["pandas", "matplotlib", "scipy", "pillow"]
 modal = ["modal"]
 
 [tool.setuptools.packages.find]
