@@ -3,7 +3,7 @@
 K1a  (CPU-runnable) For every shape in the sweep: random x, per-slot A/B (ranks vary, one base segment), and the
      LoRA delta computed by
        path 'op'      torch.ops.loramux.lora_apply_ (Triton on CUDA in bf16; on CPU the op falls back to
-                      torch_ref, so CPU rows only check the plumbing and come out ~0),
+                      torch_ref, so CPU rows only check the plumbing: status=plumbing, never counted by the bar),
        path 'interp'  the Triton shrink/expand kernels called directly on CPU in fp32 under TRITON_INTERPRET=1
                       (env var must be set before the process imports triton; otherwise status=skipped),
      against `lora_apply_ref_(..., fp32=True)` on the same (dtype-rounded) inputs. y starts at zero in fp32, so the
@@ -150,6 +150,12 @@ def interp_available() -> str | None:
     return None
 
 
+def op_runs_kernels(device: str) -> bool:
+    """Whether the 'op' path on `device` runs the Triton kernels (else it is the torch_ref fallback)."""
+    from loramux.ops import custom_op
+    return custom_op.use_triton(torch.empty(0, device=device))
+
+
 def _run_interp(c, bm) -> torch.Tensor:
     from loramux.ops.triton_expand_add import expand_add_
     from loramux.ops.triton_shrink import shrink
@@ -169,11 +175,12 @@ def run_k1a(shapes=DEFAULT_SHAPES, *, paths=PATHS, device: str | None = None, dt
     dtype = dtype or (torch.bfloat16 if device.startswith("cuda") else torch.float32)
     rows = []
     skip_interp = interp_available()
+    op_status = "ok" if op_runs_kernels(device) else "plumbing"
     with torch.no_grad():
         for i, (T, di, do, r, s) in enumerate(shapes):
             for p in paths:
                 dev, dt = (device, dtype) if p == "op" else ("cpu", torch.float32)
-                row = {"check": "K1a", "status": "ok", "path": p, "T": T, "d_in": di, "d_out": do, "rank": r, "n_seg": s,
+                row = {"check": "K1a", "status": op_status if p == "op" else "ok", "path": p, "T": T, "d_in": di, "d_out": do, "rank": r, "n_seg": s,
                            "dtype": str(dt).replace("torch.", ""), "device": dev, "rel_err": None, "max_abs_err": None}
                 if p == "interp" and skip_interp:
                     row["status"] = skip_interp

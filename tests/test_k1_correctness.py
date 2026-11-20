@@ -39,14 +39,15 @@ def test_lpips_tensor_layout_and_guard():
         assert d is None
 
 
-def test_k1a_cpu_tiny_passes():
+def test_k1a_cpu_op_is_plumbing_only():
     rows = k1.run_k1a(k1.TINY_SHAPES, paths=("op",), device="cpu")
     assert len(rows) == len(k1.TINY_SHAPES)
-    assert all(r["status"] == "ok" and r["rel_err"] <= 2e-3 for r in rows)
-    assert k1.summarize_k1(rows).verdicts[0].passed is True
+    assert all(r["status"] == "plumbing" and r["rel_err"] <= 2e-3 for r in rows)
+    assert k1.summarize_k1(rows).verdicts[0].passed is None      # the torch_ref fallback cannot pass K1a
 
 
 def test_k1a_detects_wrong_answer(monkeypatch):
+    monkeypatch.setattr(k1, "op_runs_kernels", lambda device: True)
     monkeypatch.setattr(k1, "_run_op", lambda c, bm: k1._reference(c) * 1.01)
     rows = k1.run_k1a(k1.TINY_SHAPES[1:2], paths=("op",), device="cpu")
     assert rows[0]["rel_err"] == pytest.approx(0.01, rel=1e-3)
