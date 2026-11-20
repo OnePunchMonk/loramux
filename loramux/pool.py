@@ -17,8 +17,10 @@ class AdapterPool:
                  device="cuda", dtype=torch.bfloat16):
         self.layer_shapes, self.S, self.r_max = dict(layer_shapes), slots, r_max
         self.device, self.dtype = device, dtype
-        self.A = {k: torch.zeros(slots, r_max, di, dtype=dtype, device=device) for k, (di, do) in layer_shapes.items()}
-        self.B = {k: torch.zeros(slots, do, r_max, dtype=dtype, device=device) for k, (di, do) in layer_shapes.items()}
+        self.fp8 = dtype == torch.float8_e4m3fn   # FP8 weights + fp32 per-row scales (L1.5 format)
+        self.A, self.B, self.SA, self.SB = {}, {}, {}, {}
+        self.layer_shapes = {}
+        self.add_layers(layer_shapes)
         self.rank = torch.zeros(slots, dtype=torch.int32, device=device)
         self.rank_host = [0] * slots         # host mirror of `rank` (max over layers), for r_bucket without a sync
         self.cpu: dict[str, dict] = {}
@@ -46,6 +48,9 @@ class AdapterPool:
             self.layer_shapes[k] = (di, do)
             self.A[k] = torch.zeros(self.S, self.r_max, di, dtype=self.dtype, device=self.device)
             self.B[k] = torch.zeros(self.S, do, self.r_max, dtype=self.dtype, device=self.device)
+            if self.fp8:
+                self.SA[k] = torch.ones(self.S, self.r_max, dtype=torch.float32, device=self.device)
+                self.SB[k] = torch.ones(self.S, do, dtype=torch.float32, device=self.device)
 
     def add_group(self, name: str, keys: list[str]):
         """Linears that share their input (q/k/v): store their A stacks adjacent so one grouped shrink reads x once."""
@@ -54,12 +59,18 @@ class AdapterPool:
             raise ValueError(f"group {name}: needs >= 2 layers with the same d_in, got {keys}")
         if any(self.group_of(k) is not None for k in keys):
             raise ValueError(f"group {name}: a layer is already grouped")
+        if self.fp8:
+            raise NotImplementedError("grouped FP8 layers")
         d_in = dims.pop()
         cat = torch.zeros(self.S, len(keys) * self.r_max, d_in, dtype=self.dtype, device=self.device)
         for i, k in enumerate(keys):
             cat[:, i * self.r_max:(i + 1) * self.r_max].copy_(self.A[k])
             self.A[k] = cat[:, i * self.r_max:(i + 1) * self.r_max]
         self._groups[name] = (list(keys), cat)
+
+    def scales(self, k):
+        """(a_scale [S, R], b_scale [S, d_out]) fp32 for an FP8 pool, else None."""
+        return (self.SA[k], self.SB[k]) if self.fp8 else None
 
     def group_of(self, k):
         for name, (keys, _) in self._groups.items():
@@ -69,7 +80,7 @@ class AdapterPool:
 
     def group_buffers(self, name):
         keys, cat = self._groups[name]
-        return cat, self.rank.expand(len(keys), self.S)
+        return cat, self.rank.expand(len(keys), self.S), None
 
     def slot_rank(self, slot: int) -> int:
         return self.rank_host[slot]
@@ -87,9 +98,16 @@ class AdapterPool:
             if a.shape[0] > self.r_max:
                 raise ValueError(f"adapter {key}: rank {a.shape[0]} > r_max {self.r_max} at {k}")
         self.blobs.pop(key, None)
-        self.cpu[key] = {k: (a.to(self.dtype).cpu().pin_memory() if torch.cuda.is_available() else a.to(self.dtype).cpu(),
-                             b.to(self.dtype).cpu().pin_memory() if torch.cuda.is_available() else b.to(self.dtype).cpu())
-                         for k, (a, b) in tensors.items()}
+        self.cpu[key] = {k: (self._host(a), self._host(b)) for k, (a, b) in tensors.items()}
+
+    def _host(self, t):
+        """Host copy in storage format: a tensor, or (fp8 q, fp32 row scale) for an FP8 pool."""
+        pin = (lambda u: u.pin_memory()) if torch.cuda.is_available() else (lambda u: u)
+        if self.fp8:
+            from .compress import quantize_fp8_rows
+            q, sc = quantize_fp8_rows(t.cpu())
+            return pin(q), pin(sc)
+        return pin(t.to(self.dtype).cpu())
 
     def register_blob(self, key: str, path):
         """CPU-tier entry backed by an .lmx file. Only the header is read now (to validate); the payload is
@@ -132,12 +150,22 @@ class AdapterPool:
             for k in self.layer_shapes:
                 self.A[k][slot].zero_()
                 self.B[k][slot].zero_()
+            r_adapter = 0
             for k, (a, b) in ad.items():
+                if self.fp8 and not isinstance(a, tuple):       # bf16 blob payload into an FP8 pool
+                    a, b = self._host(a), self._host(b)
+                if self.fp8:
+                    (a, sa), (b, sb) = a, b
+                    self.SA[k][slot, :a.shape[0]].copy_(sa, non_blocking=True)
+                    self.SB[k][slot].copy_(sb, non_blocking=True)
+                    self.h2d_bytes += (sa.numel() + sb.numel()) * 4
                 r = a.shape[0]
+                r_adapter = max(r_adapter, r)
                 self.A[k][slot, :r].copy_(a, non_blocking=True)
                 self.B[k][slot, :, :r].copy_(b, non_blocking=True)
                 self.h2d_bytes += (a.numel() + b.numel()) * a.element_size()
-            r_adapter = max(a.shape[0] for a, _ in ad.values())
+            if not ad:
+                raise ValueError("adapter has no layers")
             self.rank[slot] = r_adapter
             self.rank_host[slot] = r_adapter
             ev = None

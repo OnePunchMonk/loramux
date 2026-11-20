@@ -205,7 +205,7 @@ Environment for every L1/L2 task: `. /home/claude/.venv-loramux/bin/activate`. C
 - Custom op signature updated; `register_fake` kept.
 - Tests: interpreter (fp32) sweep of ragged and uniform shapes, ranks {8, 16, 64, 128} in one batch, rank-0 layers, slot −1, `N % BM != 0`, `d_out % BN != 0`, `d_in % BK != 0`; GPU-marked bf16 versions with rel err ≤ 2e-3.
 
-### L2.2 FP8-weight kernels — `ops/triton_*_fp8w.py` — `todo`
+### L2.2 FP8-weight kernels — `ops/triton_*_fp8w.py` — `review`
 - A and B stored `float8_e4m3fn` with per-row fp32 scales (L1.5 format); upcast in registers. Same modes and masks as L2.1. Selected by the pool's storage dtype.
 - Tests: GPU-marked accuracy vs the bf16 path (FP8 isn't reliable in the interpreter; try it, and keep an interp test only if it passes deterministically).
 

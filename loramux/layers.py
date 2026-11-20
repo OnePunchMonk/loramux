@@ -37,24 +37,27 @@ class MuxLinear(nn.Module):
         if m is None or not m.any_lora or not self.pool.has_layer(self.layer_key) or x.numel() == 0:
             return y
         A, B, rank = self.pool.buffers(self.layer_key)
+        sc = self.pool.scales(self.layer_key) if hasattr(self.pool, "scales") else None
+        sa, sb = sc if sc is not None else (None, None)
         y2, x2 = y.view(-1, y.shape[-1]), x.reshape(-1, x.shape[-1])
         z_bf16 = self.z_dtype == torch.bfloat16
         us = m.uniform_shape(x)
         if us is not None:
             rows, N = us
             rt = m.rows_for(rows)
-            if not torch.compiler.is_compiling() and self._grouped(m, x, x2, y2, B, rank, rt, N):
+            if not torch.compiler.is_compiling() and self._grouped(m, x, x2, y2, B, rank, sb, rt, N):
                 return y
-            torch.ops.loramux.lora_apply_(y2, x2, A, B, rank, rt.slot, rt.scale, N, m.r_bucket, z_bf16=z_bf16)
+            torch.ops.loramux.lora_apply_(y2, x2, A, B, rank, rt.slot, rt.scale, N, m.r_bucket, z_bf16=z_bf16,
+                                          a_scale=sa, b_scale=sb)
         else:
             v = m.view_for(x)
             t = v.tiles
             torch.ops.loramux.lora_apply_(y2, x2, A, B, rank, v.row_slot, v.row_scale, 0, m.r_bucket,
                                           v.seg_start, v.seg_len, t.tile_seg, t.tile_row0, t.tile_row_end, t.bm,
-                                          z_bf16=z_bf16)
+                                          z_bf16=z_bf16, a_scale=sa, b_scale=sb)
         return y
 
-    def _grouped(self, m, x, x2, y2, B, rank, rt, N) -> bool:
+    def _grouped(self, m, x, x2, y2, B, rank, sb, rt, N) -> bool:
         group_of = getattr(self.pool, "group_of", None)
         gi = group_of(self.layer_key) if group_of is not None else None
         if gi is None or not custom_op.use_triton(x2):
@@ -64,14 +67,14 @@ class MuxLinear(nn.Module):
         name, idx, G = gi
         ent = m._zcache.get(name)
         if ent is None or ent[0] is not x or ent[1] != x._version:
-            A_cat, ranks = self.pool.group_buffers(name)
+            A_cat, ranks, sa_cat = self.pool.group_buffers(name)
             z = shrink_grouped(x2, A_cat, ranks, rt.slot, G=G, r_bucket=m.r_bucket, N=N, z_dtype=self.z_dtype,
-                               d_out=y2.shape[1])
+                               a_scale=sa_cat, d_out=y2.shape[1])
             ent = m._zcache[name] = [x, x._version, z, set()]
         ent[3].add(idx)
         RB = kernel_rb(m.r_bucket)
         expand_add_(y2, ent[2][:, idx * RB:(idx + 1) * RB], B, rank, rt.slot, rt.scale, r_bucket=m.r_bucket, N=N,
-                    d_in=x2.shape[1])
+                    b_scale=sb, d_in=x2.shape[1])
         if len(ent[3]) == G:          # every member consumed it: drop the workspace (and the reference to x)
             del m._zcache[name]
         return True
