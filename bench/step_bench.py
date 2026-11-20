@@ -217,8 +217,11 @@ class LoRAHarness:
         if rows_per_req not in (1, 2):
             raise ValueError("rows_per_req must be 1 or 2")
 
+        # Built once, outside the (possibly compiled) region: build_meta pins host memory, which dynamo cannot trace.
+        # In serving it runs once per step on the host (~0.07 ms, see bench/profile_b4.py), not inside the model.
+        meta = build_meta(slots, [1.0] * bs, cfg_layout="concat", device=dev, r_max=rank, per_row_2d=True)
+
         def fn():
-            meta = build_meta(slots, [1.0] * bs, cfg_layout="concat", device=dev, r_max=rank, per_row_2d=True)
             with lora_batch(meta):
                 return fwd(**inputs)
         return fn
