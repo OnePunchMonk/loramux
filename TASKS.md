@@ -167,7 +167,7 @@ Environment for every L1/L2 task: `. /home/claude/.venv-loramux/bin/activate`. C
 - `composite_from_blobs([(path, strength), ...]) -> canonical` using `compose_multi` per layer (layers missing in some adapters are handled).
 - Tests: convert → register_blob → ensure_resident on CPU gives the same slot contents as `register`; composite equals the sum of parts on a random input.
 
-### L1.5 Lossy compression reference — `loramux/compress.py` — `todo`
+### L1.5 Lossy compression reference — `loramux/compress.py` — `review`
 - `svd_truncate(A, B, energy=0.995, max_rank=None) -> (A', B', k)` via `QR(B)`, `QR(Aᵀ)`, `SVD(R₁R₂ᵀ)` (§11.2.1). Exact when `energy=1.0` (up to fp tolerance).
 - `effective_rank_report(canonical, energy) -> dict[layer, (r, k)]`.
 - `quantize_fp8_rows(t) -> (q: float8_e4m3fn, scale: fp32 per row)`, `dequantize_fp8_rows(q, scale) -> bf16`. Per-row amax scaling; zero rows stay zero.
