@@ -2,7 +2,11 @@ import pytest
 
 from bench.spend import SpendCapError, append_row, check_caps, estimate, read_rows
 
-OLD_TABLE = "# GPU spend log\n\n| date | run | GPU | minutes | est. USD | actual USD | cumulative |\n|---|---|---|---|---|---|---|\n"
+OLD_TABLE = (
+    "# GPU spend log\n\n"
+    "| date | run | GPU | minutes | est. USD | actual USD | cumulative |\n"
+    "|---|---|---|---|---|---|---|\n"
+)
 
 
 def test_estimate_math():
