@@ -18,6 +18,7 @@ from __future__ import annotations
 import re
 from contextlib import contextmanager
 
+import torch
 from torch import nn
 
 from ..layers import patch_model, unpatch_model
@@ -92,6 +93,9 @@ def mixed_lora(pipe, req_slots, req_scales, *, cfg_layout: str = "concat"):
     n = len(slots)
     saved: list = []
 
+    # The hooks run eagerly even when the transformer is torch.compile'd: they only build host-side metadata,
+    # and tracing them would guard on every slot value (a recompile per batch composition).
+    @torch.compiler.disable
     def pre(module, args, kwargs):
         hs = kwargs["hidden_states"] if "hidden_states" in kwargs else args[0]
         b = hs.shape[0]
@@ -103,6 +107,7 @@ def mixed_lora(pipe, req_slots, req_scales, *, cfg_layout: str = "concat"):
         saved.append(context._current)
         context._current = meta
 
+    @torch.compiler.disable
     def post(module, args, kwargs, output):
         if saved:
             context._current = saved.pop()

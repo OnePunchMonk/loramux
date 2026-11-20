@@ -218,7 +218,7 @@ Environment for every L1/L2 task: `. /home/claude/.venv-loramux/bin/activate`. C
 - CPU device path: the same descriptor table applied with torch copies (tests).
 - Tests: CPU path equals the old per-tensor semantics; interpreter test of `triton_scatter`; LRU, refcount and readiness rules; staging reuse ordering; per-layer rank masks give correct results when a layer is missing from the adapter or has a different rank.
 
-### L2.4 Compile and no-sync — `ops/custom_op.py`, `layers.py`, `tests/test_compile.py` — `todo`
+### L2.4 Compile and no-sync — `ops/custom_op.py`, `layers.py`, `tests/test_compile.py` — `review`
 - Zero graph breaks with `torch.compile` on (a) the toy model and (b) the tiny diffusers Qwen-Image transformer from L1.2 (CPU, `backend="aot_eager"` and `"eager"`), with mixed adapters and CFG. Inside the compiled region, MuxLinear must not touch Python lists of the meta in ways that create guards per value (pass device tensors; keep the host-side branch on `any_lora` outside or as a guard that changes once per batch).
 - Test that `forward` does no device-to-host copy: run under `torch.cuda.set_sync_debug_mode("error")` (GPU-marked).
 
