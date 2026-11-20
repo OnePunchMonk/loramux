@@ -41,12 +41,12 @@ The skeleton was written before this pipeline existed, so every file still needs
 
 Each task is self-contained: file paths, behavior and tests are all given here. Use only numpy, torch, safetensors, matplotlib and the standard library unless a task says otherwise.
 
-### L0.1 Project config — `todo`
+### L0.1 Project config — `review`
 - `pyproject.toml`: add extras `bench = ["pandas", "matplotlib", "scipy"]` and `modal = ["modal"]`. Add `[tool.ruff]` with `line-length = 120`, target `py310`.
 - `.gitignore`: add `results/*` with exceptions `!results/.gitkeep`. Create `results/.gitkeep`.
 - Accept: `pip install -e .[dev,bench]` works; `ruff check loramux bench tests` passes on new files.
 
-### L0.2 Timing and results utilities — `bench/common.py` — `todo`
+### L0.2 Timing and results utilities — `bench/common.py` — `review`
 - `collect_env() -> dict`: python, torch, triton (if importable), diffusers (if importable), safetensors versions; `torch.cuda.get_device_name(0)` and driver version (`torch.cuda.driver_version()` if present, else `nvidia-smi` query, else `None`); hostname; UTC timestamp. Never raises.
 - `time_cuda(fn, warmup=3, iters=20) -> list[float]` (ms per iteration, CUDA events; falls back to `time.perf_counter` with a `"timer": "cpu"` flag when CUDA is absent).
 - `summarize(ms: list[float]) -> dict`: `median`, `p90`, `mean`, `n`.
@@ -55,7 +55,7 @@ Each task is self-contained: file paths, behavior and tests are all given here. 
 - `seed_all(seed)`: python, numpy, torch.
 - Tests `tests/test_bench_common.py` (CPU): summarize on a known list; interleave order alternates (record call order with fakes); CSV round-trip including env.
 
-### L0.3 Request latency record — `loramux/latency.py` — `todo`
+### L0.3 Request latency record — `loramux/latency.py` — `review`
 - `AdapterSource` enum: `NONE, GPU_HIT, CPU_HIT, DISK_HIT, MISS`.
 - `RequestTimeline` dataclass with float timestamps (seconds, `time.perf_counter` domain): `t_arrive, t_admit_ready_text, t_adapter_resident, t_first_step, t_last_step, t_vae_done, t_encode_done, t_sent`, plus `adapter_source`, `n_steps`, `request_id`, `adapter_key | None`.
 - `breakdown(tl) -> dict` returns the §11.3 terms in ms:
@@ -71,13 +71,13 @@ Each task is self-contained: file paths, behavior and tests are all given here. 
 - `LatencyLog`: append timelines; `to_rows()` → list of dicts (timestamps, breakdown, source); `percentiles(term, by=("adapter_source",)) -> dict` with P50/P90/P99.
 - Tests: hand-built timelines with known numbers; base-request path; percentiles on a small known set; the sum of terms equals `e2e`.
 
-### L0.4 Prompt-embedding cache — `loramux/textcache.py` — `todo`
+### L0.4 Prompt-embedding cache — `loramux/textcache.py` — `review`
 - `TextEmbedCache(max_entries: int, max_bytes: int | None = None)`. Key = `(encoder_id: str, prompt: str, max_len: int)`. Values = a tensor or a tuple/dict of tensors; size = sum of `numel * element_size`.
 - `get(key)` (moves to MRU), `put(key, value)` (evicts LRU until both limits hold; an item larger than `max_bytes` alone is not cached), `stats()` → hits, misses, evictions, entries, bytes.
 - Optional `bypass(adapter_has_text_encoder: bool)` helper returns True when the request carries a text-encoder LoRA (those must not use the cache).
 - Tests: LRU order, byte-limit eviction, oversize item, nested value sizes, stats.
 
-### L0.5 Packed adapter blob — `loramux/blob.py` — `todo`
+### L0.5 Packed adapter blob — `loramux/blob.py` — `review`
 File format `.lmx` (§11.1), little-endian:
 ```
 bytes 0..7     magic b"LMXBLOB1"
@@ -95,18 +95,18 @@ payload        per layer, in the given order: A[r, d_in] then B[d_out, r], bf16 
 - `blob_nbytes(path) -> int` (payload bytes only).
 - Tests: round-trip equality (bitwise, bf16) for mixed ranks and shapes; offsets aligned to 256; corrupted payload fails `verify=True`; bad magic raises; empty adapter raises.
 
-### L0.6 Synthetic perf adapters — `bench/synth_adapters.py` — `todo`
+### L0.6 Synthetic perf adapters — `bench/synth_adapters.py` — `review`
 - `make_adapter(layer_shapes: dict[str, tuple[int,int]], rank: int, targets: str, seed: int) -> dict` where `targets ∈ {"attn", "all"}`; `"attn"` keeps keys whose last component matches `to_q|to_k|to_v|to_out(\.0)?|attn` (regex given as a module constant `ATTN_PAT`). `A ~ N(0, 1/d_in)`, `B ~ N(0, 1e-2)`, float32.
 - `make_perf_set(layer_shapes, n=64, ranks=(8,16,32,64), seed=0) -> dict[str, dict]`: half `attn`, half `all`, ranks cycled; keys `perf_{i:03d}_{targets}_r{rank}`.
 - CLI: `python -m bench.synth_adapters --shapes shapes.json --out dir/ --n 64` writes one `.lmx` per adapter via `loramux.blob.write_blob`, plus `index.json`.
 - Tests: determinism by seed; rank/target split; attention filter; statistics roughly match (std of A ≈ 1/sqrt(d_in) within 10% on a large layer).
 
-### L0.7 Modal entrypoints and spend guard — `modal_app.py`, `bench/spend.py` — `todo`
+### L0.7 Modal entrypoints and spend guard — `modal_app.py`, `bench/spend.py` — `review`
 - `bench/spend.py`: `estimate(gpu: str, minutes: float, usd_per_hour: float) -> float`; `append_row(path="SPEND.md", date, run, gpu, minutes, est_usd, actual_usd)` appends a markdown table row and recomputes the `cumulative` column; `check_caps(path, phase_cap=25.0, total_cap=200.0, phase="1", new_est=…)` raises `SpendCapError` if adding the estimate would exceed a cap. Phase is tracked by a `phase` column (add it to the table header if missing; keep the existing rows valid).
 - `modal_app.py`: add `bench_cpu(script: str, args: str = "")` (CPU, runs `python -m <script> <args>` in `/work`) and `bench_gpu(script, args, est_minutes: float)` (H100!, calls `check_caps` before running and fails fast if exceeded; prints `collect_env()` first). Keep the existing test entrypoints unchanged.
 - Tests (CPU): estimate math; append + cumulative; cap error; parsing an existing table with no rows.
 
-### L0.8 Plots from CSVs — `bench/plots.py`, `bench/latency_breakdown.py` — `todo`
+### L0.8 Plots from CSVs — `bench/plots.py`, `bench/latency_breakdown.py` — `review`
 Input CSVs use `bench/common.write_csv`. Pure matplotlib, Agg backend, PNG + SVG output.
 - `plot_overhead_vs_tokens(csv, out)`: columns `baseline, tokens, overhead_pct` → one line per baseline (B0–B5), log-x tokens.
 - `plot_sim(csv, out)`: columns `policy, rho, throughput, p50_ms, p99_ms` → two panels: throughput vs ρ and P99 vs ρ, one line per policy (P1/P2/P3).

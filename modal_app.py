@@ -14,7 +14,8 @@ gpu_img = _src(_cpu.pip_install("triton"))
 # Bench images add the bench extra. add_local_dir must stay last, so these are built from _cpu directly.
 bench_cpu_img = _src(_cpu.pip_install("pandas", "matplotlib", "scipy"))
 bench_gpu_img = _src(_cpu.pip_install("triton", "pandas", "matplotlib", "scipy"))
-# UNVERIFIED: recalled Modal on-demand H100 rate. Must be verified against Modal's current price list before any GPU run.
+# Modal H100 SXM5 list rate, $0.001097/s (~$3.95/h), checked 2026-11-20 against third-party price trackers.
+# GPU only: CPU and memory are billed on top. Re-check Modal's pricing page before a large run.
 H100_USD_PER_HOUR = 3.95
 
 
