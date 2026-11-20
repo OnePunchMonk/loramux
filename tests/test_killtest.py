@@ -1,7 +1,7 @@
 import pytest
 
 from bench.common import write_csv
-from bench.killtest import Config, evaluate, render, run, verdict
+from bench.killtest import Config, _any_regime, evaluate, render, run, verdict
 from bench.spend import SpendCapError, append_row
 
 
@@ -10,6 +10,12 @@ from bench.spend import SpendCapError, append_row
     (True, False, None, "NO-GO"), (True, True, None, "INCOMPLETE"), (None, True, True, "INCOMPLETE")])
 def test_verdict_table(k1, k2, k3, want):
     assert verdict(k1, k2, k3) == want
+
+
+@pytest.mark.parametrize("passed,want", [([], None), ([None], None), ([False, None], None), ([False, True], True),
+                                          ([False, False], False), ([None, True], True)])
+def test_k3_needs_a_pass_and_stays_incomplete_while_a_regime_is_unmeasured(passed, want):
+    assert _any_regime(passed) is want
 
 
 def _results(d, *, k1a_err=1e-4, b4=8.0, b2=20.0, attn=3.0, all_=10.0, p99_ratio=0.4, thr_ratio=1.0, rhos=(0.7, 0.9)):

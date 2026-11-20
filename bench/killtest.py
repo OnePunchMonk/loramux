@@ -161,6 +161,14 @@ def roofline(rows: list[dict], dim: int) -> list[dict]:
             for r in rows if r.get("baseline") == "B4" and r.get("status") == "ok" and r.get("overhead_pct") is not None]
 
 
+def _any_regime(passed) -> bool | None:
+    """K3 needs one regime to pass: True if any did, False only if every regime was measured and failed."""
+    passed = list(passed)
+    if any(p is True for p in passed):
+        return True
+    return False if passed and all(p is False for p in passed) else None
+
+
 def verdict(k1: bool | None, k2: bool | None, k3: bool | None) -> str:
     if k1 is False or k2 is False:
         return "NO-GO"
@@ -175,7 +183,7 @@ def evaluate(results: Path, dim: int = 3072, spend_path: str = "SPEND.md") -> di
     k2b, k2b_rows = k2b_values(results)
     k2 = check_group(K2, {"K2a": k2a, **k2b})
     regimes = k3_regimes(results)
-    k3 = None if not regimes or all(r["passed"] is None for r in regimes) else any(r["passed"] for r in regimes)
+    k3 = _any_regime(r["passed"] for r in regimes)
     spend = spent(read_rows(spend_path), "1")
     return {"verdict": verdict(k1.passed, k2.passed, k3), "k1": k1, "k2": k2, "k2a_rows": k2a_rows,
             "k2b_rows": k2b_rows, "k3": k3, "k3_regimes": regimes, "roofline": roofline(list(k2a_rows.values()), dim),
