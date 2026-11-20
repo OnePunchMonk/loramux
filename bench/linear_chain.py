@@ -151,7 +151,17 @@ def build_chains(*, layers: int, dim: int, rank: int, adapters: int, tokens: int
                 h = m(h)
         return h
 
-    fns: dict[str, Callable | str] = {"B0": b0, "B1": b1, "B2": b2, "B3": b3, "B4": b4}
+    mux_f = [MuxLinear(lin, k, pool, fused=True) for lin, k in zip(base, keys)]
+
+    def b4f():
+        meta = build_meta(slots, scales, device=device, r_max=rank)
+        with lora_batch(meta):
+            h = x
+            for m in mux_f:
+                h = m(h)
+        return h
+
+    fns: dict[str, Callable | str] = {"B0": b0, "B1": b1, "B2": b2, "B3": b3, "B4": b4, "B4f": b4f, "_mux": mux, "_mux_f": mux_f}
     ops = _vllm_ops() if str(device).startswith("cuda") else None
     if ops is None:
         fns["B5"] = "unavailable"

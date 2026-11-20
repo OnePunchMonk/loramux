@@ -30,6 +30,17 @@ def cuda_ms(fn, iters=20, warmup=5):
     return t[len(t) // 2]
 
 
+def graph_ms(fn, iters=20):
+    """Median replay time of fn captured in a CUDA graph (launch overhead removed)."""
+    for _ in range(3):
+        fn()
+    torch.cuda.synchronize()
+    g = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(g):
+        fn()
+    return cuda_ms(g.replay, iters=iters)
+
+
 def host_ms(fn, iters=20):
     """Wall time to enqueue the work, no sync inside: ~CPU launch cost."""
     torch.cuda.synchronize()
@@ -62,15 +73,27 @@ def main():
             meta = build_meta(slots, scales, device="cuda", r_max=a.rank)
             b0, b4 = fns["B0"], fns["B4"]
 
-            def b4_prebuilt():
-                with lora_batch(meta):
-                    return fns["_mux_chain"](x) if "_mux_chain" in fns else b4()
-
             r = dict(tokens=T, rows=rows, N=x.shape[1])
             r["B0_gpu_ms"] = cuda_ms(b0)
             r["B4_gpu_ms"] = cuda_ms(b4)
             r["meta_build_gpu_ms"] = cuda_ms(lambda: build_meta(slots, scales, device="cuda", r_max=a.rank))
             r["meta_build_host_ms"] = host_ms(lambda: build_meta(slots, scales, device="cuda", r_max=a.rank))
+            r["B4f_gpu_ms"] = cuda_ms(fns["B4f"])
+            r["B4f_host_ms"] = host_ms(fns["B4f"])
+            def chain(mods):
+                def f():
+                    with lora_batch(meta):
+                        h = x
+                        for m in mods:
+                            h = m(h)
+                    return h
+                return f
+            graph_fns = {"B0": b0, "B4": chain(fns["_mux"]), "B4f": chain(fns["_mux_f"])}
+            for nm, gf in graph_fns.items():
+                try:
+                    r[nm + "_graph_ms"] = graph_ms(gf)
+                except Exception as e:  # noqa: BLE001
+                    r[nm + "_graph_ms"] = f"error:{type(e).__name__}: {e}"[:200]
             r["B0_host_ms"] = host_ms(b0)
             r["B4_host_ms"] = host_ms(b4)
             # kernel table from the torch profiler
