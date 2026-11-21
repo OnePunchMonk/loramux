@@ -25,6 +25,7 @@ a slot before that event completes: `is_ready(key)` polls it, `wait(key)` blocks
 """
 from __future__ import annotations
 
+import weakref
 from collections import OrderedDict
 from dataclasses import dataclass
 
@@ -117,6 +118,7 @@ class AdapterPool:
         self.hits = self.misses = self.evictions = self.h2d_bytes = 0
         self._events: dict[str, object] = {}
         self._stream = None
+        self._bound_modules: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
         self._ring = _StagingRing(n_staging, device, pin=torch.cuda.is_available())
         self.add_layers(layer_shapes)
 
@@ -177,6 +179,33 @@ class AdapterPool:
             if self.fp8:
                 self.SA[k].copy_(oSA_[k])
                 self.SB[k].copy_(oSB_[k])
+        for module, key in list(self._bound_modules.items()):
+            self._rebind(module, key)
+
+    def bind(self, module, key: str):
+        """Track a MuxLinear so relayout can update its registered buffer views."""
+        self._bound_modules[module] = key
+        self._rebind(module, key)
+
+    def unbind(self, module):
+        """Stop tracking a module removed from a model."""
+        self._bound_modules.pop(module, None)
+
+    def _rebind(self, module, key: str):
+        if key in self.A:
+            A, B, rank = self.buffers(key)
+            scales = self.scales(key) if self.fp8 else None
+            a_scale, b_scale = scales if scales is not None else (None, None)
+            has_layer = True
+        else:
+            A = B = rank = a_scale = b_scale = None
+            has_layer = False
+        module._buffers["pool_A"] = A
+        module._buffers["pool_B"] = B
+        module._buffers["pool_rank"] = rank
+        module._buffers["pool_a_scale"] = a_scale
+        module._buffers["pool_b_scale"] = b_scale
+        module._has_pool_layer = has_layer
 
     def _sync_side_stream(self):
         if self._stream is not None:

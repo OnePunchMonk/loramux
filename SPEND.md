@@ -19,3 +19,8 @@
 | 2026-11-20 | k2b klein 1024 attn slices fix | H100 | 12 | 0.7900 |  | 13.5900 | 1 |
 | 2026-11-20 | K1b fp32 klein + controls | H100 | 20 | 1.3200 |  | 14.9100 | 1 |
 | 2026-11-20 | K1b fp32 klein + controls (retry, contiguous x) | H100 | 20 | 1.3200 |  | 16.2300 | 1 |
+| 2026-11-20 | profile qwen_image 512+1024 bs1-16 compile (stopped at ~75 GPU-min per owner, all compile, no results) | H100 | 75 | 4.9400 |  | 21.1700 | 1 |
+| 2026-11-21 | profile smoke: qwen 512 bs1,2 compile regional | H100 | 8 | 0.5300 |  | 21.7000 | 1 |
+| 2026-11-21 | profile qwen 512+1024 bs1-16 compile regional (full; LoRA rows invalid, patch set missed) | H100 | 14 | 0.9200 |  | 22.6200 | 1 |
+| 2026-11-21 | profile check: qwen 1024 bs8 k8 regional (n_patched fix) | H100 | 6 | 0.4000 |  | 23.0200 | 1 |
+| 2026-11-21 | profile check 2: qwen 1024 bs8 k8 regional (recompile fix; 1 recompile, was 60) | H100 | 6 | 0.4000 |  | 23.4200 | 1 |

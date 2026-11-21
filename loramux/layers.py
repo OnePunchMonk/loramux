@@ -34,23 +34,39 @@ class MuxLinear(nn.Module):
         # strided views, so the untouched columns cost nothing.
         self.in_slice, self.out_slice = in_slice, out_slice
 
+        # Resolve the layer once. Forward must only read tensor attributes so repeated blocks can share a graph.
+        A = B = rank = a_scale = b_scale = None
+        if pool.has_layer(layer_key):
+            A, B, rank = pool.buffers(layer_key)
+            scales = pool.scales(layer_key) if hasattr(pool, "scales") else None
+            if scales is not None:
+                a_scale, b_scale = scales
+        self.register_buffer("pool_A", A, persistent=False)
+        self.register_buffer("pool_B", B, persistent=False)
+        self.register_buffer("pool_rank", rank, persistent=False)
+        self.register_buffer("pool_a_scale", a_scale, persistent=False)
+        self.register_buffer("pool_b_scale", b_scale, persistent=False)
+        self._has_pool_layer = A is not None
+        bind = getattr(pool, "bind", None)
+        if callable(bind):
+            bind(self, layer_key)
+
     def forward(self, x):
         m = current()
-        if self.fused and self.in_slice is None and self.out_slice is None and m is not None and m.any_lora and self.pool.has_layer(self.layer_key) and x.numel():
+        if self.fused and self.in_slice is None and self.out_slice is None and m is not None and m.any_lora and self._has_pool_layer and x.numel():
             us = m.uniform_shape(x)
-            if us is not None and getattr(self.pool, "scales", lambda k: None)(self.layer_key) is None:
-                A, B, rank = self.pool.buffers(self.layer_key)
+            if us is not None and self.pool_a_scale is None:
                 rt = m.rows_for(us[0])
-                y = torch.ops.loramux.lora_linear(x.reshape(-1, x.shape[-1]).contiguous(), self.base.weight, self.base.bias, A, B,
-                                                  rank, rt.slot, rt.scale, us[1], m.r_bucket,
-                                                  self.z_dtype == torch.bfloat16)
+                y = torch.ops.loramux.lora_linear(
+                    x.reshape(-1, x.shape[-1]).contiguous(), self.base.weight, self.base.bias,
+                    self.pool_A, self.pool_B, self.pool_rank, rt.slot, rt.scale, us[1], m.r_bucket,
+                    self.z_dtype == torch.bfloat16)
                 return y.view(*x.shape[:-1], -1)
         y = self.base(x)
-        if m is None or not m.any_lora or not self.pool.has_layer(self.layer_key) or x.numel() == 0:
+        if m is None or not m.any_lora or not self._has_pool_layer or x.numel() == 0:
             return y
-        A, B, rank = self.pool.buffers(self.layer_key)
-        sc = self.pool.scales(self.layer_key) if hasattr(self.pool, "scales") else None
-        sa, sb = sc if sc is not None else (None, None)
+        A, B, rank = self.pool_A, self.pool_B, self.pool_rank
+        sa, sb = self.pool_a_scale, self.pool_b_scale
         y2, x2 = y.view(-1, y.shape[-1]), x.reshape(-1, x.shape[-1])
         if self.out_slice is not None:
             y2 = y2[:, self.out_slice[0]:self.out_slice[1]]
@@ -91,14 +107,24 @@ def patch_model(model: nn.Module, target_patterns: list[str], pool, slices=None,
     """Replace linears whose qualified name matches any regex; return their keys. mux_kwargs go to MuxLinear.
     slices: optional {key: (in_slice, out_slice)} column windows (see MuxLinear)."""
     pats = [re.compile(p) for p in target_patterns]
-    keys = []
+    matches = []
+    layer_shapes = {}
     for name, mod in list(model.named_modules()):
         for cname, child in list(mod.named_children()):
             full = f"{name}.{cname}" if name else cname
             if isinstance(child, nn.Linear) and any(p.search(full) for p in pats):
                 ins, outs = (slices or {}).get(full, (None, None))
-                setattr(mod, cname, MuxLinear(child, full, pool, in_slice=ins, out_slice=outs, **mux_kwargs))
-                keys.append(full)
+                d_in = (ins[1] - ins[0]) if ins is not None else child.in_features
+                d_out = (outs[1] - outs[0]) if outs is not None else child.out_features
+                matches.append((name, cname, full, child, ins, outs))
+                layer_shapes[full] = (d_in, d_out)
+    if hasattr(pool, "add_layers"):
+        pool.add_layers(layer_shapes)
+    keys = []
+    modules = dict(model.named_modules())
+    for name, cname, full, child, ins, outs in matches:
+        setattr(modules[name], cname, MuxLinear(child, full, pool, in_slice=ins, out_slice=outs, **mux_kwargs))
+        keys.append(full)
     return keys
 
 
@@ -108,6 +134,9 @@ def unpatch_model(model: nn.Module) -> list[str]:
     for mod in list(model.modules()):
         for cname, child in list(mod.named_children()):
             if isinstance(child, MuxLinear):
+                unbind = getattr(child.pool, "unbind", None)
+                if callable(unbind):
+                    unbind(child)
                 setattr(mod, cname, child.base)
                 keys.append(child.layer_key)
     return keys

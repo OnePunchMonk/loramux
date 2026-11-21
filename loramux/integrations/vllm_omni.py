@@ -87,7 +87,7 @@ class VLLMMuxLinear(MuxLinear):
 
 def patch_vllm_linears(model: nn.Module, pool, targets: list[str]) -> list[str]:
     pats = [re.compile(p) for p in targets]
-    keys, dims = [], {}
+    found, dims = [], {}
     for name, mod in list(model.named_modules()):
         for cname, child in list(mod.named_children()):
             full = f"{name}.{cname}" if name else cname
@@ -95,11 +95,14 @@ def patch_vllm_linears(model: nn.Module, pool, targets: list[str]) -> list[str]:
                 if getattr(child, "output_size_per_partition", child.output_size) != child.output_size:
                     raise NotImplementedError(f"{full}: tensor parallel linears are not supported in mixed mode")
                 dims[full] = (child.input_size, child.output_size)
-                w = VLLMMuxLinear(child, full, pool)
-                w.returns_tuple = getattr(child, "return_bias", True)
-                setattr(mod, cname, w)
-                keys.append(full)
-    pool.add_layers({k: (dims[k][0], dims[k][1]) for k in keys})
+                found.append((mod, cname, full, child))
+    pool.add_layers(dims)
+    keys = []
+    for mod, cname, full, child in found:
+        w = VLLMMuxLinear(child, full, pool)
+        w.returns_tuple = getattr(child, "return_bias", True)
+        setattr(mod, cname, w)
+        keys.append(full)
     return keys
 
 
