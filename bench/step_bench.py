@@ -213,9 +213,11 @@ class LoRAHarness:
     """
 
     def __init__(self, target: StepTarget, *, targets: str, n_adapters: int, rank: int, seed: int = 0,
-                 attn_slices: bool = True):
+                 attn_slices: bool = True, shapes: dict[str, tuple[int, int]] | None = None):
+        """shapes: the linears to patch, precomputed in eager mode. Pass it when parts of the model are already
+        compiled: token_linears finds linears with forward hooks, which compiled blocks do not run."""
         self.target, self.targets, self.n_adapters, self.rank = target, targets, n_adapters, rank
-        shapes = token_linears(target, linear_shapes(target.model, targets))
+        shapes = dict(shapes) if shapes is not None else token_linears(target, linear_shapes(target.model, targets))
         if not shapes:
             raise ValueError(f"no linear layers match targets={targets!r}")
         slices = None
@@ -228,16 +230,19 @@ class LoRAHarness:
         if str(target.device).startswith("cuda"):
             torch.cuda.synchronize()
         patch_keys(target.model, shapes, self.pool, slices=slices)
+        self.n_patched = len(shapes)
 
     def close(self) -> None:
         unpatch_model(self.target.model)
 
-    def step_fn(self, inputs: dict, bs: int, k: int, rows_per_req: int = 1) -> Callable[[], torch.Tensor]:
-        """Callable running one forward with bs requests spread over k distinct adapters (k=1: uniform)."""
+    def step_fn(self, inputs: dict, bs: int, k: int, rows_per_req: int = 1,
+                forward: Callable | None = None) -> Callable[[], torch.Tensor]:
+        """Callable running one forward with bs requests spread over k distinct adapters (k=1: uniform).
+        forward: the callable to run (default target.forward; pass a compiled one to reuse its graph)."""
         if not 1 <= k <= min(bs, self.n_adapters):
             raise ValueError(f"need 1 <= k <= min(bs={bs}, n_adapters={self.n_adapters}), got k={k}")
         slots = [self.pool.slot_of[f"ad{i % k}"] for i in range(bs)]
-        fwd = self.target.forward
+        fwd = forward or self.target.forward
         dev, rank = self.target.device, self.rank
         if rows_per_req not in (1, 2):
             raise ValueError("rows_per_req must be 1 or 2")

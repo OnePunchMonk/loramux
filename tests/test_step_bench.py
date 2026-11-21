@@ -48,7 +48,7 @@ def test_profile_steps_csv_contract(tmp_path):
     rows = profile_steps(lambda res: ToyDiTTarget(n_img=8), resolutions=(512, 1024), batch_sizes=(1, 2, 4),
                          k_values=(2, 4), adapter_sets=("all",), rank=4, rounds=1, warmup=0, iters=1)
     cols = ["model", "resolution", "bs", "rows_per_req", "kind", "k", "targets", "rank", "mode", "median_ms",
-            "p90_ms", "mean_ms", "n", "timer"]
+            "p90_ms", "mean_ms", "n", "timer", "compile_scope", "first_call_s", "n_patched"]
     assert all(list(r) == cols for r in rows)
     for res in (512, 1024):
         sel = [r for r in rows if r["resolution"] == res]
