@@ -7,7 +7,20 @@ dependencies = ["torch>=2.4", "safetensors", "numpy"]
 [project.optional-dependencies]
 gpu = ["triton"]
 dev = ["pytest"]
-diffusers = ["diffusers", "peft"]
+diffusers = ["diffusers==0.43.0", "peft"]
+bench = ["pandas", "matplotlib", "scipy", "pillow"]
+modal = ["modal"]
+lpips = ["lpips"]
+
+[tool.setuptools.packages.find]
+include = ["loramux*", "bench*"]
 
 [tool.pytest.ini_options]
-markers = ["gpu: needs a CUDA GPU"]
+markers = [
+    "gpu: needs a CUDA GPU",
+    "interp: runs Triton kernels in the interpreter on CPU (fp32, small shapes; TRITON_INTERPRET=1 is set by tests/conftest.py on CPU-only hosts)",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
