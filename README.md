@@ -2,7 +2,7 @@
 
 Put requests that use different LoRA adapters into the same diffusion batch.
 
-Status: design only, nothing benchmarked yet. See `HANDOFF.md` for the full spec and `BENCH_CHECKLIST.md` for the benchmark plan.
+Status: design only, nothing benchmarked yet. See `HANDOFF.md` for the full spec, `BENCH_CHECKLIST.md` for the benchmark plan and `TASKS.md` for the remaining work by complexity level.
 
 ## The problem
 
