@@ -26,7 +26,7 @@ a slot before that event completes: `is_ready(key)` polls it, `wait(key)` blocks
 from __future__ import annotations
 
 import weakref
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from dataclasses import dataclass
 
 import numpy as np
@@ -66,7 +66,7 @@ class _StagingRing:
         self.next = 0
         self.size = 0          # bytes: largest registered payload (buffers are allocated at least this big)
         self.waits = 0         # times a take() had to block on a buffer still in flight
-        self.order: list[int] = []
+        self.order: deque[int] = deque(maxlen=64)   # recent buffer indices, for tests and debugging
 
     def take(self, nbytes: int, stream=None) -> int:
         i = self.next

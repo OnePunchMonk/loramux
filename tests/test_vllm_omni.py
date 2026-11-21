@@ -142,6 +142,23 @@ def test_attach_wraps_worker_step_and_request_paths():
     assert pool.refs["lora:1"] == 0   # request-mode requests are released when the forward returns
 
 
+def test_step_mode_repeats_rows_per_request_outputs():
+    """Two requests with two images each: rows are [a, a, b, b], not CFG-style [a, b, a, b]."""
+    files = {"a": _peft(1), "b": _peft(2)}
+    model, ref, _, mux = _setup(files)
+    pipe = SimpleNamespace(denoise_step=lambda ib: model(ib.x), forward=lambda rb: model(rb.x))
+    worker = SimpleNamespace(lora_manager=None, model_runner=SimpleNamespace(pipeline=pipe))
+    mux.attach(worker)
+    new = [SimpleNamespace(request_id=rid, req=SimpleNamespace(sampling_params=SimpleNamespace(
+        lora_request=SimpleNamespace(lora_int_id=i, lora_path=p), lora_scale=1.0, num_outputs_per_prompt=2)))
+        for i, (rid, p) in enumerate((("s0", "a"), ("s1", "b")))]
+    worker._activate_step_lora(SimpleNamespace(finished_req_ids=[], scheduled_new_reqs=new))
+    x = torch.randn(4, 3, D)
+    y = pipe.denoise_step(SimpleNamespace(x=x, request_ids=["s0", "s1"]))
+    for row, p in enumerate("aabb"):
+        torch.testing.assert_close(y[row:row + 1], _dense(ref, *files[p], 1.0)(x[row:row + 1]), atol=BF16_ATOL, rtol=3e-2)
+
+
 def test_drop_lora_identity_makes_keys_equal():
     @dataclasses.dataclass(frozen=True)
     class Key:

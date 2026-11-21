@@ -201,3 +201,32 @@ def test_mixed_pins_in_flight_load_and_admits_once_ready():
     res = _loop("mixed", model, pool).run(tr)
     assert len(res.log.timelines) == 3 and Ev.polls > 3
     assert all(v == 0 for v in pool.refs.values())
+
+
+def test_virtual_loads_queue_on_one_stream():
+    """Two misses issued together finish one after the other, as copies on the pool's single load stream."""
+    model, pool = _setup("mixed")
+    tr = [Request(id=i, t_arrive=0.0, adapters=[k], scales=[1.0], steps=2, prompt_id=i) for i, k in enumerate("ab")]
+    loop = _loop("mixed", model, pool, cost=CostModel(h2d_s=0.07, text_s=0.0))
+    loop.run(tr)
+    assert sorted(loop._key_ready.values()) == pytest.approx([0.07, 0.14])
+
+
+def test_keyed_swaps_clone_each_base_weight_once():
+    model, pool = _setup("keyed")
+    loop = _loop("keyed", model, pool)
+    a, b = list(pool.cpu)[:2]
+    loop._swap((a, 1.0))
+    first = {k: v.data_ptr() for k, v in loop._orig.items()}
+    loop._swap((b, 1.0))
+    loop._swap((a, 1.0))
+    assert {k: loop._orig[k].data_ptr() for k in first} == first
+
+
+def test_serve_restores_keyed_weights():
+    from bench.serve_loop import serve
+    model, pool = _setup("keyed")
+    w0 = {n: p.clone() for n, p in model.module.state_dict().items()}
+    serve(model, pool, _trace(6), policy="keyed", max_bs=4, clock=VirtualClock(), cost=CostModel(swap_s=0.2))
+    for n, p in model.module.state_dict().items():
+        assert torch.equal(p, w0[n]), n

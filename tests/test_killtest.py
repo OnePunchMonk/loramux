@@ -25,9 +25,13 @@ def _results(d, *, k1a_err=1e-4, b4=8.0, b2=20.0, attn=3.0, all_=10.0, p99_ratio
     write_csv(d / "k2a.csv", [{"baseline": b, "status": "ok", "tokens_requested": 4096, "tokens": 4096,
                                "overhead_pct": v, "note": "x"} for b, v in (("B0", 0.0), ("B2", b2), ("B4", b4))], {})
     if attn is not None:
-        write_csv(d / "k2b_qwen_image.csv", [{"mode": "compile", "adapters": "attn", "overhead_pct": attn},
-                                             {"mode": "compile", "adapters": "all", "overhead_pct": all_},
-                                             {"mode": "eager", "adapters": "all", "overhead_pct": 99.0}], {})
+        w = {"model": "qwen_image_1024", "bs": 8, "k": 8}
+        smoke = {"model": "qwen_image_512", "bs": 1, "k": 1}   # not the preregistered workload: ignored
+        write_csv(d / "k2b_qwen_image.csv", [{**w, "mode": "compile", "adapters": "attn", "overhead_pct": attn},
+                                             {**w, "mode": "compile", "adapters": "all", "overhead_pct": all_},
+                                             {**w, "mode": "eager", "adapters": "all", "overhead_pct": 99.0},
+                                             {**smoke, "mode": "compile", "adapters": "attn", "overhead_pct": 99.0},
+                                             {**smoke, "mode": "compile", "adapters": "all", "overhead_pct": 0.1}], {})
     rows = []
     for rho in rhos:
         rows += [{"rho": rho, "policy": "P1", "throughput_rps": 1.0, "p99_ms": 100.0},
@@ -41,7 +45,7 @@ def _results(d, *, k1a_err=1e-4, b4=8.0, b2=20.0, attn=3.0, all_=10.0, p99_ratio
     ({"p99_ratio": 0.9}, "GREY"),                # K3 fails, kernel fine
     ({"k1a_err": 1e-2}, "NO-GO"),                # K1a fails
     ({"b4": 15.0}, "NO-GO"),                     # K2a: 15/20 > 0.5
-    ({"all_": 13.0}, "NO-GO"),                   # K2b all-linear > 12% (eager row ignored)
+    ({"all_": 13.0}, "NO-GO"),                   # K2b all-linear > 12% (eager and smoke rows ignored)
     ({"attn": None}, "INCOMPLETE"),              # K2b not measured
     ({"p99_ratio": 0.9, "thr_ratio": 1.6}, "GO"),  # K3 passes on throughput instead of P99
     ({"rhos": (0.7,)}, "INCOMPLETE"),            # a K3 rho missing -> regime not measured

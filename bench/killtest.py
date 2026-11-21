@@ -120,10 +120,23 @@ def k2a_value(rows: list[dict]) -> tuple[float | None, dict]:
     return (math.inf if b2 <= 0 else b4 / b2), at
 
 
+K2B_BS, K2B_K, K2B_RES = 8, 8, 1024
+
+
+def _k2b_workload(r: dict) -> bool:
+    """Only the preregistered workload counts: bs=8, 8 distinct adapters, 1024^2. Older CSVs carry the
+    resolution only as the model suffix (e.g. qwen_image_1024)."""
+    res = r.get("resolution") or str(r.get("model", "")).rsplit("_", 1)[-1]
+    try:
+        return int(r.get("bs") or 0) == K2B_BS and int(r.get("k") or 0) == K2B_K and int(res) == K2B_RES
+    except ValueError:
+        return False
+
+
 def k2b_values(results: Path) -> tuple[dict[str, float | None], list[dict]]:
     """Worst compiled overhead over every measured model, per adapter set (each model must meet the bar)."""
     per_model = [dict(r, file=p.name) for p in sorted(results.glob("k2b_*.csv")) for r in _rows(p)
-                 if r.get("mode") == "compile" and r.get("adapters") in ("attn", "all")]
+                 if r.get("mode") == "compile" and r.get("adapters") in ("attn", "all") and _k2b_workload(r)]
     worst = {}
     for aset, bar in (("attn", "K2b_attn"), ("all", "K2b_all")):
         xs = [float(r["overhead_pct"]) for r in per_model if r["adapters"] == aset]

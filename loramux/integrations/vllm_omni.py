@@ -129,6 +129,7 @@ class MixedLoRA:
         self.keymap = make_keymap(names)
         self._req: dict[str, tuple[object, float]] = {}   # request id -> (LoRARequest | None, scale)
         self._pinned: dict[str, str] = {}                  # request id -> pool key held for its lifetime
+        self._n_out: dict[str, int] = {}                   # request id -> images per prompt (rows per request)
 
     # ---- adapters ---------------------------------------------------------------------------------------------
     def resolve(self, lora_request) -> str:
@@ -147,14 +148,16 @@ class MixedLoRA:
             self.pool.register(key, canon)
         return key
 
-    def note_request(self, request_id: str, lora_request, scale: float = 1.0) -> None:
+    def note_request(self, request_id: str, lora_request, scale: float = 1.0, n_outputs: int = 1) -> None:
         """Remember a request's adapter and start loading it (hidden behind the request's text encoding)."""
         self._req[request_id] = (lora_request, float(scale))
+        self._n_out[request_id] = max(1, int(n_outputs or 1))
         if lora_request is not None:
             self.pool.ensure_resident(self.resolve(lora_request))
 
     def forget(self, request_id: str) -> None:
         self._req.pop(request_id, None)
+        self._n_out.pop(request_id, None)
         key = self._pinned.pop(request_id, None)
         if key is not None:
             self.pool.release(key)
@@ -172,11 +175,13 @@ class MixedLoRA:
         return self.pool.slot_of[key], scale
 
     @contextmanager
-    def batch(self, request_ids: list[str], repeat: int = 1):
-        """Set the per-request meta for one forward over `request_ids` (rows repeat `repeat` times each)."""
+    def batch(self, request_ids: list[str], repeat: int | list[int] = 1):
+        """Set the per-request meta for one forward over `request_ids`. Request i fills `repeat[i]` consecutive
+        rows (an int repeats every request the same number of times)."""
+        reps = [repeat] * len(request_ids) if isinstance(repeat, int) else list(repeat)
         pairs = [self._slot(r) for r in request_ids]
-        slots = [s for s, _ in pairs for _ in range(repeat)]
-        scales = [c for _, c in pairs for _ in range(repeat)]
+        slots = [s for (s, _), n in zip(pairs, reps, strict=True) for _ in range(n)]
+        scales = [c for (_, c), n in zip(pairs, reps, strict=True) for _ in range(n)]
         with lora_batch(build_meta(slots, scales, r_max=self.pool.r_max, device=self.pool.device)):
             yield
 
@@ -190,23 +195,25 @@ class MixedLoRA:
                 self.forget(rid)
             for new in scheduler_output.scheduled_new_reqs:
                 sp = new.req.sampling_params
-                self.note_request(new.request_id, sp.lora_request, sp.lora_scale)
+                self.note_request(new.request_id, sp.lora_request, sp.lora_scale,
+                                  getattr(sp, "num_outputs_per_prompt", 1))
 
         worker._activate_step_lora = activate
         pipe = worker.model_runner.pipeline
         step, fwd = pipe.denoise_step, pipe.forward
 
         def denoise_step(input_batch, *a, **kw):
-            with self.batch(list(input_batch.request_ids)):
+            ids = list(input_batch.request_ids)
+            with self.batch(ids, repeat=[self._n_out.get(r, 1) for r in ids]):   # rows are [a, a, b, b]
                 return step(input_batch, *a, **kw)
 
         def forward(req_batch, *a, **kw):
             for r in req_batch.requests:
                 sp = r.sampling_params
                 self.note_request(r.request_id, sp.lora_request, sp.lora_scale)
-            n = max(getattr(sp, "num_outputs_per_prompt", 1) for sp in req_batch.sampling_params_list)
+            reps = [getattr(sp, "num_outputs_per_prompt", 1) for sp in req_batch.sampling_params_list]
             try:
-                with self.batch(req_batch.request_ids, repeat=n):
+                with self.batch(req_batch.request_ids, repeat=reps):
                     return fwd(req_batch, *a, **kw)
             finally:
                 for rid in req_batch.request_ids:

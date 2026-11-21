@@ -478,6 +478,7 @@ class ServeLoop:
         self._orig: dict[str, torch.Tensor] = {}   # keyed: pristine copy of every weight ever merged into
         self._linears = None
         self._key_ready: dict = {}  # key -> time its current load completes
+        self._load_free = 0.0       # virtual: when the single load stream is next idle (loads queue, as in the pool)
 
     # ---- compute hooks (no-ops without a model)
 
@@ -517,7 +518,9 @@ class ServeLoop:
         with torch.no_grad():
             for k, (a, b) in self.pool.canonical(key).items():
                 w = lin[k].weight
-                orig = self._orig.setdefault(k, w.detach().clone())   # bf16 merge then subtract does not round-trip
+                if k not in self._orig:                                # bf16 merge then subtract does not round-trip
+                    self._orig[k] = w.detach().clone()
+                orig = self._orig[k]
                 if sign < 0:
                     w.copy_(orig)
                 else:
@@ -585,7 +588,12 @@ class ServeLoop:
         r.slot = self.pool.acquire(r.key, loading_ok=True)   # admitted only once is_ready (below)
         r.t_issue = now
         if src is not AdapterSource.GPU_HIT or r.key not in self._key_ready:
-            self._key_ready[r.key] = now + (self.cost.h2d(src, r.key) if self.clock.virtual else 0.0)
+            cost = self.cost.h2d(src, r.key) if self.clock.virtual else 0.0
+            if cost > 0:
+                self._load_free = max(now, self._load_free) + cost
+                self._key_ready[r.key] = self._load_free
+            else:
+                self._key_ready[r.key] = now
         r.ready_at = self._key_ready[r.key]     # an in-flight load started by another request counts
 
     def _adapter_ready(self, r: _Live) -> bool:
@@ -606,6 +614,7 @@ class ServeLoop:
     def run(self, trace: list[Request]) -> ServeResult:
         self.clock.start()
         self._key_ready = {}
+        self._load_free = 0.0
         pending = deque(sorted(trace, key=lambda q: (q.t_arrive, str(q.id))))
         waiting: list[_Live] = []
         running: list[_Live] = []
@@ -704,7 +713,11 @@ class ServeLoop:
 
 
 def serve(model, pool, trace, **kw) -> ServeResult:
-    return ServeLoop(model, pool, **kw).run(trace)
+    loop = ServeLoop(model, pool, **kw)
+    try:
+        return loop.run(trace)
+    finally:
+        loop.restore()   # keyed: leave the base weights as they were
 
 
 # ---------------------------------------------------------------- CLI (toy model; real-clock replay)

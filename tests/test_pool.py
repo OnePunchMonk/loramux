@@ -253,12 +253,12 @@ def test_staging_ring_reuse_waits_for_event():
         i = ring.take(32)
         evs.append(_FakeEvent())
         ring.events[i] = evs[-1]
-    assert ring.order == [0, 1] and ring.host[0].numel() == 64 and ring.waits == 0
+    assert list(ring.order) == [0, 1] and ring.host[0].numel() == 64 and ring.waits == 0
     evs[1].done = True
     i = ring.take(100)                     # buffer 0 is reused: must wait for its (pending) event, then grow
     assert i == 0 and evs[0].syncs == 1 and ring.waits == 1 and ring.host[0].numel() >= 100
     i = ring.take(8)                       # buffer 1's event already completed: no wait
-    assert i == 1 and evs[1].syncs == 0 and ring.waits == 1 and ring.order == [0, 1, 0, 1]
+    assert i == 1 and evs[1].syncs == 0 and ring.waits == 1 and list(ring.order) == [0, 1, 0, 1]
 
 
 def test_pool_staging_round_robin_and_size():
@@ -269,7 +269,7 @@ def test_pool_staging_round_robin_and_size():
     assert size > 0
     for i in range(4):
         p.ensure_resident(f"a{i}")
-    assert p._ring.order == [0, 1, 2, 0]
+    assert list(p._ring.order) == [0, 1, 2, 0]
     assert all(h.numel() >= size for h in p._ring.host)
 
 
